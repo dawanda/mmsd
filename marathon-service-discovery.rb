@@ -138,7 +138,6 @@ class MarathonServiceDiscovery # {{{
   def status_update_event(json)
     logger.debug "on[status_update_event]:"
     obj = JSON.parse(json)
-    pp obj
 
     slave_id = obj['slaveId']
     task_status = obj['taskStatus']
@@ -160,23 +159,29 @@ class MarathonServiceDiscovery # {{{
   def health_status_changed_event(json)
     logger.debug "on[health_status_changed_event]:"
     obj = JSON.parse(json)
-    pp obj
+    #pp obj
     reset_from_tasks
   end
 
   def deployment_success(json)
     logger.debug "on[deployment_success]:"
-    obj = JSON.parse(json)
   end
 
 private
 
   def reset_from_tasks
+    clusters = collect_clusters
+
+    lb = HaproxyBuilder.new(@haproxy_cfg)
+    lb.apply(clusters)
+  end
+
+  def collect_clusters
+    clusters = {}
+
     uri = "http://#{@marathon_host}:#{@marathon_port}/v2/tasks?embed=tasks.apps"
     response = Net::HTTP.get(URI(uri))
     obj = JSON.parse(response)
-
-    clusters = {}
 
     tasks = obj['tasks']
     tasks.each do |task|
@@ -197,8 +202,7 @@ private
       end
     end
 
-    lb = HaproxyBuilder.new(@haproxy_cfg)
-    lb.apply(clusters)
+    clusters
   end
 
   def should_include?(app_id)
