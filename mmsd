@@ -4,6 +4,7 @@
 require 'rubygems'
 require 'em-eventsource'
 require 'net/http'
+require 'fileutils'
 require 'logger'
 require 'json'
 require 'pp'
@@ -45,20 +46,39 @@ class AppCluster # {{{
 end
 # }}}
 class HaproxyBuilder # {{{
-  def initialize(cfgfile)
+  def initialize(cfgfile, logger)
+    @logger = logger
     @cfgfile = cfgfile
+  end
+
+  def logger
+    @logger
   end
 
   def apply(clusters)
     tmpfile = "#{@cfgfile}.tmp"
     write_config(tmpfile, clusters)
-    # if files_differ?(@cfgfile, tmpfile) then
-    #   # 3. if changed or if no process running, then reload/start haproxy
-    # end
+    if not File.exist?(@cfgfile) then
+      logger.debug "File new. #{@cfgfile} reloaded."
+      FileUtils.mv(tmpfile, @cfgfile)
+      reload_haproxy
+    elsif not FileUtils.identical?(tmpfile, @cfgfile) then
+      logger.debug "File changed. #{@cfgfile} reloaded."
+      FileUtils.rm(@cfgfile)
+      FileUtils.mv(tmpfile, @cfgfile)
+      reload_haproxy
+    else
+      logger.debug "Nothing changed. #{@cfgfile} not reloaded."
+    end
+  end
+
+  def reload_haproxy
+    logger.debug "Restarting haproxy"
+    # TODO start or reload
   end
 
   def write_config(filename, clusters)
-    puts "HaproxyBuilder.write_config(\"#{filename}\")"
+    logger.debug "HaproxyBuilder.write_config(\"#{filename}\")"
     file = File.open(filename, File::CREAT | File::TRUNC | File::RDWR, 0644)
 
     file.write "global\n"
@@ -85,6 +105,9 @@ class HaproxyBuilder # {{{
       file.write "listen #{cluster.app_id} *:#{cluster.service_port}\n"
       file.write "  balance leastconn\n"
 
+      healthcheck_http_uri = '/'    # TODO: load from marathon
+      healthcheck_interval = 10000  # TODO: load from marathon
+
       if cluster.mode == 'http' then
         file.write "  mode http\n"
         file.write "  option forwardfor\n"
@@ -92,9 +115,13 @@ class HaproxyBuilder # {{{
       else
         file.write "  mode tcp\n"
       end
+      # TODO support custom haproxy option fields
 
       cluster.instances.each do |i|
-        file.write "  server #{i.host}:#{i.port} #{i.host}:#{i.port} check inter 10000\n"
+        name = i.host.gsub(`domainname`.strip, '').gsub(/\.$/, '') + ":" + i.port.to_s
+        file.write "  server #{name} #{i.host}:#{i.port}" +
+                   " check inter #{healthcheck_interval}" +
+                   "\n"
       end
       file.write "\n"
     end
@@ -172,7 +199,7 @@ private
   def reset_from_tasks
     clusters = collect_clusters
 
-    lb = HaproxyBuilder.new(@haproxy_cfg)
+    lb = HaproxyBuilder.new(@haproxy_cfg, logger)
     lb.apply(clusters)
   end
 
