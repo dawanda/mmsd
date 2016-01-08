@@ -46,9 +46,11 @@ class AppCluster # {{{
 end
 # }}}
 class HaproxyBuilder # {{{
-  def initialize(cfgfile, logger)
+  def initialize(haproxy_bin, haproxy_cfg, haproxy_pidfile, logger)
+    @binpath = haproxy_bin
+    @cfgfile = haproxy_cfg
+    @pidfile = haproxy_pidfile
     @logger = logger
-    @cfgfile = cfgfile
   end
 
   def logger
@@ -74,7 +76,7 @@ class HaproxyBuilder # {{{
   end
 
   def reload_haproxy
-    logger.debug "Restarting haproxy"
+    logger.debug "TODO: Reload or Restart haproxy"
     # TODO start or reload
   end
 
@@ -131,14 +133,11 @@ class HaproxyBuilder # {{{
 end
 # }}}
 class MarathonServiceDiscovery # {{{
-  def initialize(marathon_host, marathon_port, groups,
-                 haproxy_bin, haproxy_cfg, haproxy_pidfile, logger)
+  def initialize(marathon_host, marathon_port, groups, lb, logger)
     @marathon_host = marathon_host
     @marathon_port = marathon_port
     @groups = groups
-    @haproxy_bin = haproxy_bin
-    @haproxy_cfg = haproxy_cfg
-    @haproxy_pidfile = haproxy_pidfile
+    @lb = lb
     @logger = logger
 
     events_url = "http://#{marathon_host}:#{marathon_port}/v2/events"
@@ -190,13 +189,12 @@ class MarathonServiceDiscovery # {{{
 
   def health_status_changed_event(json)
     logger.debug "on[health_status_changed_event]:"
-    obj = JSON.parse(json)
-    #pp obj
     reset_from_tasks
   end
 
   def deployment_success(json)
     logger.debug "on[deployment_success]:"
+    reset_from_tasks
   end
 
 private
@@ -204,8 +202,7 @@ private
   def reset_from_tasks
     clusters = collect_clusters
 
-    lb = HaproxyBuilder.new(@haproxy_cfg, logger)
-    lb.apply(clusters)
+    @lb.apply(clusters)
   end
 
   def collect_clusters
@@ -260,7 +257,7 @@ class Mmsd # {{{
   OPT_DEFAULTS = {'marathon-host' => '',
                   'marathon-port' => '',
                   'groups' => '*',
-                  'haproxy-bin' => '/usr/bin/haproxy',
+                  'haproxy-bin' => '/usr/sbin/haproxy',
                   'haproxy-pidfile' => '/var/run/haproxy.pid',
                   'haproxy-cfg' => '/var/run/haproxy.cfg',
                   'log-level' => 'info'}
@@ -313,15 +310,13 @@ class Mmsd # {{{
     logger = Logger.new(STDOUT)
     logger.level = to_loglevel(getopt('log-level'))
 
-    marathon_host = getopt('marathon-host')
-    marathon_port = getopt('marathon-port')
-    haproxy_bin = getopt('haproxy-bin')
-    haproxy_cfg = getopt('haproxy-cfg')
-    haproxy_pidfile = getopt('haproxy-pidfile')
-    groups = getopt('groups')
-
-    sd = MarathonServiceDiscovery.new(marathon_host, marathon_port, groups,
-                                      haproxy_bin, haproxy_cfg, haproxy_pidfile,
+    sd = MarathonServiceDiscovery.new(getopt('marathon-host'),
+                                      getopt('marathon-port'),
+                                      getopt('groups'),
+                                      HaproxyBuilder.new(getopt('haproxy-bin'),
+                                                         getopt('haproxy-cfg'),
+                                                         getopt('haproxy-pidfile'),
+                                                         logger),
                                       logger)
     sd.run
   end
