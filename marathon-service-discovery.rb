@@ -219,14 +219,78 @@ private
   end
 end
 # }}}
+class Mmsd # {{{
+  def self.run(argv)
+    mmsd = Mmsd.new(argv)
+    mmsd.main
+  end
 
-logger = Logger.new(STDOUT)
-logger.level = Logger::DEBUG
-$stdout.sync = true
+  OPT_DEFAULTS = {'marathon-host' => '',
+                  'marathon-port' => '',
+                  'groups' => '*',
+                  'haproxy-bin' => '/usr/bin/haproxy',
+                  'haproxy-pidfile' => '/var/run/haproxy.pid',
+                  'log-level' => 'info'}
 
-marathon_host = ENV.fetch('MARATHON_HOST')
-marathon_port = ENV.fetch('MARATHON_PORT')
-groups = ENV.fetch('MARATHON_GROUPS')
+  def initialize(argv)
+    @args = read_env(OPT_DEFAULTS)
+    parse_args(argv, @args)
+  end
 
-sd = MarathonServiceDiscovery.new(marathon_host, marathon_port, groups, logger)
-sd.run
+  def read_env(defaults)
+    opts = {}
+
+    defaults.each do |name, default_value|
+      env_name = name.gsub('-', '_').upcase
+      env_value = ENV[env_name]
+
+      opts[name] = env_value || default_value
+    end
+
+    opts
+  end
+
+  def parse_args(argv, opts)
+    argv.each do |arg|
+      name, value = arg.split('=')
+      name.gsub!(/^--/, '')
+      opts[name] = value
+    end
+  end
+
+  def to_loglevel(value)
+    case value
+    when 'debug'
+      Logger::DEBUG
+    when 'info'
+      Logger::INFO
+    when 'warn'
+      Logger::WARN
+    else
+      Logger::ERROR
+    end
+  end
+
+  def main
+    $stdout.sync = true
+
+    logger = Logger.new(STDOUT)
+    logger.level = to_loglevel(getopt('log-level'))
+
+    marathon_host = getopt('marathon-host')
+    marathon_port = getopt('marathon-port')
+    groups = getopt('groups')
+
+    sd = MarathonServiceDiscovery.new(marathon_host, marathon_port, groups,
+                                      logger)
+    sd.run
+  end
+
+  def getopt(name)
+    puts "getopt[#{name}] = '#{@args[name]}'"
+    @args[name] || ''
+  end
+end
+# }}}
+
+Mmsd.run(ARGV)
