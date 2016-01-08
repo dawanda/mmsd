@@ -69,6 +69,7 @@ class HaproxyBuilder # {{{
       reload_haproxy
     else
       logger.debug "Nothing changed. #{@cfgfile} not reloaded."
+      FileUtils.rm(tmpfile)
     end
   end
 
@@ -125,19 +126,23 @@ class HaproxyBuilder # {{{
       end
       file.write "\n"
     end
+    file.close
   end
 end
 # }}}
 class MarathonServiceDiscovery # {{{
-  def initialize(marathon_host, marathon_port, groups, logger)
+  def initialize(marathon_host, marathon_port, groups,
+                 haproxy_bin, haproxy_cfg, haproxy_pidfile, logger)
     @marathon_host = marathon_host
     @marathon_port = marathon_port
-    @groups = groups || ['*']
+    @groups = groups
+    @haproxy_bin = haproxy_bin
+    @haproxy_cfg = haproxy_cfg
+    @haproxy_pidfile = haproxy_pidfile
     @logger = logger
-    @haproxy_cfg = "./haproxy.cfg"
 
     events_url = "http://#{marathon_host}:#{marathon_port}/v2/events"
-    # logger.info "Listening on URL #{events_url}"
+    logger.info "Listening on URL #{events_url}"
     @source = EventMachine::EventSource.new(events_url)
   end
 
@@ -257,6 +262,7 @@ class Mmsd # {{{
                   'groups' => '*',
                   'haproxy-bin' => '/usr/bin/haproxy',
                   'haproxy-pidfile' => '/var/run/haproxy.pid',
+                  'haproxy-cfg' => '/var/run/haproxy.cfg',
                   'log-level' => 'info'}
 
   def initialize(argv)
@@ -286,6 +292,7 @@ class Mmsd # {{{
   end
 
   def to_loglevel(value)
+    puts "to_loglevel: #{value}"
     case value
     when 'debug'
       Logger::DEBUG
@@ -293,6 +300,8 @@ class Mmsd # {{{
       Logger::INFO
     when 'warn'
       Logger::WARN
+    when 'error'
+      Logger::ERROR
     else
       Logger::ERROR
     end
@@ -306,15 +315,19 @@ class Mmsd # {{{
 
     marathon_host = getopt('marathon-host')
     marathon_port = getopt('marathon-port')
+    haproxy_bin = getopt('haproxy-bin')
+    haproxy_cfg = getopt('haproxy-cfg')
+    haproxy_pidfile = getopt('haproxy-pidfile')
     groups = getopt('groups')
 
     sd = MarathonServiceDiscovery.new(marathon_host, marathon_port, groups,
+                                      haproxy_bin, haproxy_cfg, haproxy_pidfile,
                                       logger)
     sd.run
   end
 
   def getopt(name)
-    puts "getopt[#{name}] = '#{@args[name]}'"
+    puts "getopt[#{name}] = #{(@args[name] || '').inspect}"
     @args[name] || ''
   end
 end
