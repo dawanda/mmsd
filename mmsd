@@ -26,8 +26,6 @@ require 'net/http'
 require 'fileutils'
 require 'logger'
 require 'json'
-require 'pp'
-require 'open3'
 
 # {{{ app instance health check
 class HealthCheck
