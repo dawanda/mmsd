@@ -65,25 +65,21 @@ end
 # }}}
 class HaproxyBuilder # {{{
   attr_accessor :binpath, :cfgfile, :pidfile, :logger
-  #attr_accessor :start_cmd, :stop_cmd, :status_cmd, :reload_cmd,
-
   def initialize(haproxy_bin, haproxy_cfg, haproxy_pidfile, logger)
     @binpath = haproxy_bin
     @cfgfile = haproxy_cfg
     @pidfile = haproxy_pidfile
     @logger = logger
-
-    # @start_cmd = "#{binpath} -c #{haproxy_cfg} -p #{@pidfile} -D"
   end
 
-  def apply(clusters)
+  def apply(clusters, force)
     tmpfile = "#{@cfgfile}.tmp"
     write_config(tmpfile, clusters)
-    if not File.exist?(@cfgfile) then
+    if !File.exist?(@cfgfile) then
       logger.debug "File new. #{@cfgfile} reloaded."
       FileUtils.mv(tmpfile, @cfgfile)
       ensure_haproxy
-    elsif not FileUtils.identical?(tmpfile, @cfgfile) then
+    elsif !FileUtils.identical?(tmpfile, @cfgfile) then
       logger.debug "File changed. #{@cfgfile} reloaded."
       FileUtils.rm(@cfgfile)
       FileUtils.mv(tmpfile, @cfgfile)
@@ -91,7 +87,7 @@ class HaproxyBuilder # {{{
     else
       logger.debug "Nothing changed. #{@cfgfile} not reloaded."
       FileUtils.rm(tmpfile)
-      ensure_haproxy
+      ensure_haproxy if force
     end
   end
 
@@ -122,7 +118,7 @@ class HaproxyBuilder # {{{
     io = IO.popen(args.join(' '))
     output = io.read
     io.close
-    logger.debug "program output: #{output}"
+    logger.debug "start haproxy program output: #{output}"
   end
 
   def reload_haproxy(pid)
@@ -131,11 +127,11 @@ class HaproxyBuilder # {{{
     io = IO.popen(args.join(' '))
     output = io.read
     io.close
-    logger.debug "program output: #{output}"
+    logger.debug "reload haproxy program output: #{output}"
   end
 
   def ensure_haproxy
-    if File.exists?(@pidfile) then
+    if File.exist?(@pidfile) then
       pid = File.read(@pidfile).strip.to_i
       if valid_pid?(pid) then
         reload_haproxy(pid)
@@ -151,7 +147,7 @@ class HaproxyBuilder # {{{
 
   def write_config(filename, clusters)
     logger.debug "HaproxyBuilder.write_config(\"#{filename}\")"
-    file = File.open(filename, File::CREAT | File::TRUNC | File::RDWR, 0644)
+    file = File.open(filename, File::CREAT | File::TRUNC | File::WRONLY, 0644)
 
     file.write "global\n"
     file.write "  maxconn 32768\n"
@@ -174,7 +170,12 @@ class HaproxyBuilder # {{{
     file.write "\n"
 
     clusters.each do |app_id, cluster|
-      file.write "listen #{cluster.app_id} *:#{cluster.service_port}\n"
+      # kill the first / and replace any other occurence with a dot
+      app_id = app_id.slice(1, app_id.length - 1)
+      app_id = app_id.gsub('/', '.')
+      bind_address = "*" # TODO: make configurable
+
+      file.write "listen #{app_id} #{bind_address}:#{cluster.service_port}\n"
       file.write "  balance leastconn\n"
 
       healthcheck_http_uri = '/'    # TODO: load from marathon
@@ -201,13 +202,72 @@ class HaproxyBuilder # {{{
   end
 end
 # }}}
+class UpstreamConfDirHandler # {{{
+  attr_accessor :confd_path, :logger
+
+  def initialize(confd_path, logger)
+    @confd_path = confd_path
+    @logger = logger
+
+    FileUtils.mkdir_p(@confd_path)
+  end
+
+  def apply(clusters, force)
+    old_files = collect_files
+    new_files = []
+
+    clusters.each do |app_id, cluster|
+      # kill the first / and replace any other occurence with a dot
+      app_id = app_id.slice(1, app_id.length - 1)
+      app_id = app_id.gsub('/', '.')
+
+      cfgfile = "#{confd_path}/#{app_id}.instances"
+      tmpfile = "#{cfgfile}.tmp"
+
+      new_files << cfgfile
+
+      flags = File::CREAT | File::TRUNC | File::WRONLY
+      mode = 0644
+
+      File.open(tmpfile, flags, mode) do |file|
+        cluster.instances.each do |instance|
+          file.write "#{instance.host}:#{instance.port}\n"
+        end
+      end
+
+      # only write this file if it changes content (to preserve mtime)
+      if !File.exist?(cfgfile) then
+        logger.debug "confd: new #{cfgfile}"
+        FileUtils.mv(tmpfile, cfgfile)
+      elsif !FileUtils.identical?(tmpfile, cfgfile) then
+        logger.debug "confd: refresh #{cfgfile}"
+        FileUtils.mv(tmpfile, cfgfile)
+      else
+        FileUtils.rm(tmpfile)
+      end
+    end
+
+    superfluous_files = old_files - new_files
+    if !superfluous_files.empty? then
+      logger.debug "Removing superfluous files: #{superfluous_files}"
+      FileUtils.rm_f(superfluous_files)
+    end
+  end
+
+  def collect_files
+    Dir.entries(@confd_path).reject {|f| f == '.' || f == '..' }.
+                             map{|f| "#{@confd_path}/#{f}"}
+  end
+end # }}}
 class MarathonServiceDiscovery # {{{
-  def initialize(marathon_host, marathon_port, groups, lb, logger)
+  def initialize(marathon_host, marathon_port, groups, upstream_confd, lb, logger)
     @marathon_host = marathon_host
     @marathon_port = marathon_port
     @groups = groups
-    @lb = lb
     @logger = logger
+
+    @confd = UpstreamConfDirHandler.new(upstream_confd, logger)
+    @lb = lb
 
     events_url = "http://#{marathon_host}:#{marathon_port}/v2/events"
     logger.info "Listening on URL #{events_url}"
@@ -219,7 +279,7 @@ class MarathonServiceDiscovery # {{{
   end
 
   def run
-    reset_from_tasks
+    reset_from_tasks(true)
 
     EM.run do
       @source.error {|message| sse_error(message)}
@@ -268,10 +328,11 @@ class MarathonServiceDiscovery # {{{
 
 private
 
-  def reset_from_tasks
+  def reset_from_tasks(force = false)
     clusters = collect_clusters
 
-    @lb.apply(clusters)
+    @confd.apply(clusters, force)
+    @lb.apply(clusters, force)
   end
 
   def collect_clusters
@@ -329,6 +390,7 @@ class Mmsd # {{{
                   'haproxy-bin' => '/usr/sbin/haproxy',
                   'haproxy-pidfile' => '/var/run/haproxy.pid',
                   'haproxy-cfg' => '/var/run/haproxy.cfg',
+                  'upstream-confd' => '/var/run/mmsd/confd',
                   'log-level' => 'info'}
 
   def initialize(argv)
@@ -382,6 +444,7 @@ class Mmsd # {{{
     sd = MarathonServiceDiscovery.new(getopt('marathon-host'),
                                       getopt('marathon-port'),
                                       getopt('groups'),
+                                      getopt('upstream-confd'),
                                       HaproxyBuilder.new(getopt('haproxy-bin'),
                                                          getopt('haproxy-cfg'),
                                                          getopt('haproxy-pidfile'),

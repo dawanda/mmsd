@@ -1,13 +1,19 @@
 # Mesos Marathon Service Discovery Agent
 
-(this is still in design / PoC phase)
+`mmsd` links your cloud together.
+
+(this is still in PoC/design phase)
+
+### Main features
+
+- simple
+- realtime update of runtime configuration state (haproxy, upstream-confd, ...)
+- modular handlers
+  - haproxy handler to manage a load balancer service
+  - upstream-confd handler to manage local upstream config files per application
 
 ### Goals
 
-- generate load balancer configuration in realtime (with auto-reloading the load
-  balancer)
-- generate local per-service config files with actual endpoints listed
-  for services that do not want to be load balanced by directly spoken to
 - filter apps to be exposed by load balancer (or service files) via labels
   from marathon app definitions.
 - provide simple rc scripts to run this agent (openrc/upstart/systemd)
@@ -15,10 +21,8 @@
 ### Start me Up
 
 ```!sh
-MARATHON_HOST=localhost
-MARATHON_PORT=8080
-
-./marathon-service-discovery.rb $MARATHON_HOST $MARATHON_PORT
+./marathon-service-discovery.rb --marathon-host=localhost \
+                                --marathon-port=8080
 ```
 
 ### Thoughts
@@ -36,9 +40,31 @@ mmsd [options]
   --haproxy-bin=PATH      Path to haproxy binary [/usr/bin/haproxy]
   --haproxy-pidfile=PATH  Path to haproxy PID file [/var/run/haproxy.pid]
   --log-level=LEVEL       one of debug, info, warn, error, fatal [info]
+  --upstream-confd=PATH   Path to runtime state dir containing
+                          a file for each Marathon application with a
+                          simple list of hostname:port pairs per line.
 
 Every commandline parameter can be also specified as environment variable,
 however, the command line argument takes precedence.
 Environment variables are upper case, without leading dashes, and mid-dashes
 represented as underscores.
 ```
+
+### Upstream Config Files
+
+An application, such as `/developer/trapni/php` will be written
+into a upstream-confd file with the name `developer.trapni.php.instances`
+with the following content
+
+```
+host1:port1
+host2:port2
+host3:port3
+```
+
+Where hostN:portN is the actual host (Mesos Slave) your application
+has been spawned on.
+
+Your application may read them upon startup and whenever this file changes
+(in realtime) to always have an up-to-date list of address:port pairs
+your other application is running on.
