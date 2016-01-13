@@ -1,5 +1,2 @@
-/*.log
-/*.tmp
-/*.cfg
-/*.pid
+/tmp
 /environ
