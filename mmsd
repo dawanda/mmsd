@@ -8,6 +8,7 @@ require 'fileutils'
 require 'logger'
 require 'json'
 require 'pp'
+require 'open3'
 
 # {{{ app instance health check
 class HealthCheck
@@ -72,12 +73,49 @@ class HaproxyBuilder # {{{
     else
       logger.debug "Nothing changed. #{@cfgfile} not reloaded."
       FileUtils.rm(tmpfile)
+      ensure_haproxy
     end
   end
 
   def reload_haproxy
     logger.debug "TODO: Reload or Restart haproxy"
+    if File.exists?(@pidfile) then
+      pid = File.read(@pidfile)
+      logger.notice "PID: #{pid} from #{@pidfile}"
+
+      logger.debug "reload haproxy"
+      cin, cout, cerr = Open3::popen3(@binpath,
+                                      '-f', @cfgfile,
+                                      '-p', @pidfile,
+                                      '-sf', pid,
+                                      '-q')
+
+      logger.debug "#{@haproxy_bin} stdout: #{cout.read}"
+      logger.debug "#{@haproxy_bin} stderr: #{cerr.read}"
+      sleep 2
+      cin.close
+      cout.close
+      cerr.close
+    else
+      logger.debug "start haproxy #{@binpath}, #{@cfgfile}, #{@pidfile}"
+      cin, cout, cerr = Open3::popen3(@binpath,
+                                      '-f', @cfgfile,
+                                      '-p', @pidfile,
+                                      '-q')
+
+      logger.debug "#{@haproxy_bin} stdout: #{cout.read}"
+      logger.debug "#{@haproxy_bin} stderr: #{cerr.read}"
+      sleep 2
+      cin.close
+      cout.close
+      cerr.close
+    end
+
     # TODO start or reload
+  end
+
+  def ensure_haproxy
+    reload_haproxy
   end
 
   def write_config(filename, clusters)
