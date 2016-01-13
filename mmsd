@@ -47,15 +47,16 @@ class AppCluster # {{{
 end
 # }}}
 class HaproxyBuilder # {{{
+  attr_accessor :binpath, :cfgfile, :pidfile, :logger
+  #attr_accessor :start_cmd, :stop_cmd, :status_cmd, :reload_cmd,
+
   def initialize(haproxy_bin, haproxy_cfg, haproxy_pidfile, logger)
     @binpath = haproxy_bin
     @cfgfile = haproxy_cfg
     @pidfile = haproxy_pidfile
     @logger = logger
-  end
 
-  def logger
-    @logger
+    # @start_cmd = "#{binpath} -c #{haproxy_cfg} -p #{@pidfile} -D"
   end
 
   def apply(clusters)
@@ -64,12 +65,12 @@ class HaproxyBuilder # {{{
     if not File.exist?(@cfgfile) then
       logger.debug "File new. #{@cfgfile} reloaded."
       FileUtils.mv(tmpfile, @cfgfile)
-      reload_haproxy
+      ensure_haproxy
     elsif not FileUtils.identical?(tmpfile, @cfgfile) then
       logger.debug "File changed. #{@cfgfile} reloaded."
       FileUtils.rm(@cfgfile)
       FileUtils.mv(tmpfile, @cfgfile)
-      reload_haproxy
+      ensure_haproxy
     else
       logger.debug "Nothing changed. #{@cfgfile} not reloaded."
       FileUtils.rm(tmpfile)
@@ -77,45 +78,58 @@ class HaproxyBuilder # {{{
     end
   end
 
-  def reload_haproxy
-    logger.debug "TODO: Reload or Restart haproxy"
-    if File.exists?(@pidfile) then
-      pid = File.read(@pidfile)
-      logger.notice "PID: #{pid} from #{@pidfile}"
-
-      logger.debug "reload haproxy"
-      cin, cout, cerr = Open3::popen3(@binpath,
-                                      '-f', @cfgfile,
-                                      '-p', @pidfile,
-                                      '-sf', pid,
-                                      '-q')
-
-      logger.debug "#{@haproxy_bin} stdout: #{cout.read}"
-      logger.debug "#{@haproxy_bin} stderr: #{cerr.read}"
-      sleep 2
-      cin.close
-      cout.close
-      cerr.close
-    else
-      logger.debug "start haproxy #{@binpath}, #{@cfgfile}, #{@pidfile}"
-      cin, cout, cerr = Open3::popen3(@binpath,
-                                      '-f', @cfgfile,
-                                      '-p', @pidfile,
-                                      '-q')
-
-      logger.debug "#{@haproxy_bin} stdout: #{cout.read}"
-      logger.debug "#{@haproxy_bin} stderr: #{cerr.read}"
-      sleep 2
-      cin.close
-      cout.close
-      cerr.close
+  def valid_pid?(pid)
+    begin
+      Process.kill(0, pid)
+      # pid = Process.spawn(status_cmd)
+      # Process.wait(pid)
+      # pid, status = Process.waitpid2(pid)
+      # status.exitstatus == 0
+    rescue => bang
+      logger.debug "Error while testing for valid PID #{pid}. #{bang}"
+      false
     end
+  end
 
-    # TODO start or reload
+  def kill_process(pid)
+    begin
+      Process.kill(:SIGKILL, pid)
+    rescue => bang
+      logger.debug "Error while killing PID #{pid}. #{bang}"
+    end
+  end
+
+  def start_haproxy
+    args = [@binpath, '-f', @cfgfile, '-p', @pidfile, '-D', '-q']
+    logger.info "Starting haproxy. #{args.join(' ')}"
+    io = IO.popen(args.join(' '))
+    output = io.read
+    io.close
+    logger.debug "program output: #{output}"
+  end
+
+  def reload_haproxy(pid)
+    args = [@binpath, '-D', '-p', @pidfile, '-f', @cfgfile, '-sf', pid]
+    logger.info "Reloading haproxy. #{args.join(' ')}"
+    io = IO.popen(args.join(' '))
+    output = io.read
+    io.close
+    logger.debug "program output: #{output}"
   end
 
   def ensure_haproxy
-    reload_haproxy
+    if File.exists?(@pidfile) then
+      pid = File.read(@pidfile).strip.to_i
+      if valid_pid?(pid) then
+        reload_haproxy(pid)
+      else
+        logger.info "PID file #{@pidfile} contains an invalid PID #{pid}."
+        kill_process(pid)
+        start_haproxy
+      end
+    else
+      start_haproxy
+    end
   end
 
   def write_config(filename, clusters)

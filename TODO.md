@@ -3,4 +3,4 @@
 - [ ] set project license (AGPL?)
 - [ ] support `--help` command line output
 - [ ] trap SIGINT, SIGTERM, SITQUIT for fast & graceful shutdown
-- [ ] implement haproxy start/reload/stop
+- [x] implement haproxy start/reload/stop
