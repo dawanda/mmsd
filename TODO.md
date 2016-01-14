@@ -1,10 +1,10 @@
 # Intermediate & Incomplete TODO
 
-- [x] support upstream config file creation
-- [ ] support group filtering
 - [ ] support `--help` command line output
-- [ ] trap SIGINT, SIGTERM, SITQUIT for fast & graceful shutdown
 - [ ] implement health checks
+- [x] support upstream config file creation
+- [x] support group filtering
   - should be read from Marathon (generic API or via labels)
+- [x] trap SIGINT, SIGTERM, SITQUIT for fast & graceful shutdown
 - [x] implement haproxy start/reload/stop
 - [x] set project license (AGPL?)
