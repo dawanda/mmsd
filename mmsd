@@ -257,7 +257,7 @@ class UpstreamConfDirHandler # {{{
 
     superfluous_files = old_files - new_files
     if !superfluous_files.empty? then
-      logger.debug "Removing superfluous files: #{superfluous_files}"
+      logger.debug "Removing superfluous files: #{superfluous_files.join(', ')}"
       FileUtils.rm_f(superfluous_files)
     end
   end
