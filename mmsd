@@ -82,7 +82,9 @@ class HaproxyBuilder # {{{
 
   def apply(clusters, force)
     tmpfile = "#{@cfgfile}.tmp"
+
     write_config(tmpfile, clusters)
+    check_haproxy(tmpfile)
 
     if !File.exist?(@cfgfile) then
       logger.debug "File new. #{@cfgfile} reloaded."
@@ -98,6 +100,8 @@ class HaproxyBuilder # {{{
       FileUtils.rm(tmpfile)
       ensure_haproxy if force
     end
+  rescue => bang
+    logger.error "[haproxy] Failed to apply configuration. #{bang}"
   end
 
   def valid_pid?(pid)
@@ -115,6 +119,26 @@ class HaproxyBuilder # {{{
     Process.kill(:SIGKILL, pid)
   rescue => bang
     logger.debug "Error while killing PID #{pid}. #{bang}"
+  end
+
+  def check_haproxy(cfgfile)
+    args = [@binpath, '-f', cfgfile, '-p', @pidfile, '-c']
+    logger.info "Checking haproxy configuration. #{args.join(' ')}"
+
+    io = IO.popen(args.join(' '))
+    output = io.read.strip
+    io.close
+    status = $?.exitstatus
+
+    if !output.empty? then
+      if status != 0 then
+        logger.error "#{output}"
+      else
+        logger.info "#{output}"
+      end
+    end
+
+    status
   end
 
   def start_haproxy
@@ -260,6 +284,8 @@ class UpstreamConfDirHandler # {{{
       logger.debug "Removing superfluous files: #{superfluous_files.join(', ')}"
       FileUtils.rm_f(superfluous_files)
     end
+  rescue => bang
+    logger.error "[confd] Failed to apply configuration. #{bang}"
   end
 
   def collect_files
