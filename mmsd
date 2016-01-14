@@ -425,7 +425,6 @@ class Mmsd # {{{
   end
 
   def to_loglevel(value)
-    puts "to_loglevel: #{value}"
     case value
     when 'debug'
       Logger::DEBUG
@@ -463,7 +462,6 @@ class Mmsd # {{{
   end
 
   def getopt(name)
-    puts "getopt[#{name}] = #{(@args[name] || '').inspect}"
     @args[name] || ''
   end
 end
