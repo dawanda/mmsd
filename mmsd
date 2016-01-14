@@ -49,13 +49,14 @@ class AppInstance # {{{
 end
 # }}}
 class AppCluster # {{{
-  attr_accessor :instances, :app_id, :service_port, :mode
+  attr_accessor :instances, :app_id, :service_port, :mode, :labels
 
-  def initialize(app_id, service_port, mode)
+  def initialize(app_id, service_port, mode, labels)
     @instances = []
     @app_id = app_id
     @service_port = service_port
     @mode = mode
+    @labels = {}
   end
 
   def add_backend(name, host, port)
@@ -78,6 +79,7 @@ class HaproxyBuilder # {{{
   def apply(clusters, force)
     tmpfile = "#{@cfgfile}.tmp"
     write_config(tmpfile, clusters)
+
     if !File.exist?(@cfgfile) then
       logger.debug "File new. #{@cfgfile} reloaded."
       FileUtils.mv(tmpfile, @cfgfile)
@@ -337,26 +339,29 @@ private
   def collect_clusters
     clusters = {}
 
-    uri = "http://#{@marathon_host}:#{@marathon_port}/v2/tasks?embed=tasks.apps"
+    uri = "http://#{@marathon_host}:#{@marathon_port}/v2/apps?embed=apps.tasks"
     response = Net::HTTP.get(URI(uri))
     obj = JSON.parse(response)
 
-    tasks = obj['tasks']
-    tasks.each do |task|
-      name = task['id']
-      host = task['host']
-      port = task['ports'][0]
-      app_id = task['appId'].gsub('/', '.')
-      service_port = task['servicePorts'][0] # XXX only the first one as primary
+    apps = obj['apps']
+    apps.each do |app|
+      app_id = app['id'].gsub('/', '.')
 
       if should_include?(app_id) then
-        cluster = clusters[app_id]
-        if cluster  == nil then
-          mode = 'tcp' # TODO: one of (tcp, http, ...)
-          cluster = clusters[app_id] = AppCluster.new(app_id, service_port, mode)
-          # TODO: add health check definitions
+        service_port = app['ports'][0] || 0
+        mode = 'tcp' # TODO: one of (tcp, http, ...)
+        labels = {} # TODO
+        # TODO: add health check definitions
+
+        cluster = AppCluster.new(app_id, service_port, mode, labels)
+        app['tasks'].each do |task|
+          name = task['id']
+          host = task['host']
+          port = task['ports'][0]
+          cluster.add_backend(name, host, port)
         end
-        cluster.add_backend(name, host, port)
+
+        clusters[app_id] = cluster
       end
     end
 
