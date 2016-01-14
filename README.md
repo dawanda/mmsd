@@ -2,8 +2,6 @@
 
 `mmsd` links your cloud together.
 
-(this is still in PoC/design phase)
-
 ### Main features
 
 - simple
@@ -11,23 +9,15 @@
 - modular handlers
   - haproxy handler to manage a load balancer service
   - upstream-confd handler to manage local upstream config files per application
-
-### Goals
-
-- filter apps to be exposed by load balancer (or service files) via labels
+- TODO: filter apps to be exposed by load balancer (or service files) via labels
   from marathon app definitions.
-- provide simple rc scripts to run this agent (openrc/upstart/systemd)
+- TODO: provide simple rc scripts to run this agent (openrc/upstart/systemd)
 
 ### Start me Up
 
 ```!sh
-./marathon-service-discovery.rb --marathon-host=localhost \
-                                --marathon-port=8080
+mmsg  --marathon-host=localhost --marathon-port=8080
 ```
-
-### Thoughts
-
-- wrt. docker, handle haproxy container-locally?
 
 ### Usage
 
