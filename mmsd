@@ -27,6 +27,10 @@ require 'fileutils'
 require 'logger'
 require 'json'
 
+# The label name that is identifying group filters.
+# The value will be a comma seperated list of groups.
+FILTER_GROUP_NAME = 'group'
+
 # {{{ app instance health check
 class HealthCheck
   def initialize
@@ -264,12 +268,14 @@ class UpstreamConfDirHandler # {{{
   end
 end # }}}
 class MarathonServiceDiscovery # {{{
-  def initialize(marathon_host, marathon_port, groups, handlers, logger)
+  def initialize(marathon_host, marathon_port, group_filter, handlers, logger)
     @marathon_host = marathon_host
     @marathon_port = marathon_port
-    @groups = groups
+    @group_filter = group_filter
     @logger = logger
     @handlers = handlers
+
+    logger.debug "mmsd groups: #{group_filter.inspect}"
 
     events_url = "http://#{marathon_host}:#{marathon_port}/v2/events"
     logger.info "Listening on URL #{events_url}"
@@ -347,10 +353,12 @@ private
     apps.each do |app|
       app_id = app['id'].gsub('/', '.')
 
-      if should_include?(app_id) then
+      groups = ((app['labels'] || {})[FILTER_GROUP_NAME] || '').split(',')
+
+      if should_include?(app_id, groups) then
         service_port = app['ports'][0] || 0
         mode = 'tcp' # TODO: one of (tcp, http, ...)
-        labels = {} # TODO
+        labels = app['labels']
         # TODO: add health check definitions
 
         cluster = AppCluster.new(app_id, service_port, mode, labels)
@@ -368,8 +376,14 @@ private
     clusters
   end
 
-  def should_include?(app_id)
-    true # TODO: filter by @groups
+  # filter applications by (globbed) group names
+  # [production, staging1, staging2] & [staging*] == [staging1, staging2]
+  def should_include?(app_id, groups)
+    return true if @group_filter.include?('*')
+
+    !groups.select do |group|
+      @group_filter.any?{|g| File.fnmatch(g, group)}
+    end.empty?
   end
 
   def dump_clusters(clusters)
@@ -392,7 +406,7 @@ class Mmsd # {{{
 
   OPT_DEFAULTS = {'marathon-host' => '',
                   'marathon-port' => '',
-                  'groups' => '*',
+                  'filter-groups' => '*',
                   'haproxy-bin' => '/usr/sbin/haproxy',
                   'haproxy-pidfile' => '/var/run/haproxy.pid',
                   'haproxy-cfg' => '/var/run/haproxy.cfg',
@@ -470,7 +484,7 @@ class Mmsd # {{{
 
     sd = MarathonServiceDiscovery.new(getopt('marathon-host'),
                                       getopt('marathon-port').to_i,
-                                      getopt('groups'),
+                                      getopt('filter-groups').split(','),
                                       handlers,
                                       logger)
     sd.run
