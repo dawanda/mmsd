@@ -1,7 +1,8 @@
 FROM ruby:2.2.4
 
 RUN gem install em-eventsource
+RUN apt-get update && apt-get install -y haproxy
 
-ADD marathon-service-discovery.rb /mmsd.rb
+ADD mmsd /mmsd
 
-CMD ["/mmsd.rb"]
+ENTRYPOINT ["/mmsd"]

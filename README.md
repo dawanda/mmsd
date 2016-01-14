@@ -19,6 +19,16 @@
 mmsg  --marathon-host=localhost --marathon-port=8080
 ```
 
+### Docker Support
+```!sh
+# build mmsd docker container image
+docker build -t mmsd .
+
+# run mmsd docker container in background
+docker run --net=host -d --name mmsd mmsd \
+           --marathon-host=$YOUR_MARATHON_IP --marathon-port=8080
+```
+
 ### Usage
 
 ```
