@@ -64,11 +64,14 @@ class AppCluster # {{{
 end
 # }}}
 class HaproxyBuilder # {{{
-  attr_accessor :binpath, :cfgfile, :pidfile, :logger
-  def initialize(haproxy_bin, haproxy_cfg, haproxy_pidfile, logger)
-    @binpath = haproxy_bin
-    @cfgfile = haproxy_cfg
-    @pidfile = haproxy_pidfile
+  attr_accessor :binpath, :cfgfile, :pidfile, :bindaddr, :logger
+
+  def initialize(binpath, cfgfile, pidfile, bindaddr, port, logger)
+    @binpath = binpath
+    @cfgfile = cfgfile
+    @pidfile = pidfile
+    @bindaddr = bindaddr
+    @port = port
     @logger = logger
   end
 
@@ -92,24 +95,20 @@ class HaproxyBuilder # {{{
   end
 
   def valid_pid?(pid)
-    begin
-      Process.kill(0, pid)
-      # pid = Process.spawn(status_cmd)
-      # Process.wait(pid)
-      # pid, status = Process.waitpid2(pid)
-      # status.exitstatus == 0
-    rescue => bang
-      logger.debug "Error while testing for valid PID #{pid}. #{bang}"
-      false
-    end
+    Process.kill(0, pid)
+    # pid = Process.spawn(status_cmd)
+    # Process.wait(pid)
+    # pid, status = Process.waitpid2(pid)
+    # status.exitstatus == 0
+  rescue => bang
+    logger.debug "Error while testing for valid PID #{pid}. #{bang}"
+    false
   end
 
   def kill_process(pid)
-    begin
-      Process.kill(:SIGKILL, pid)
-    rescue => bang
-      logger.debug "Error while killing PID #{pid}. #{bang}"
-    end
+    Process.kill(:SIGKILL, pid)
+  rescue => bang
+    logger.debug "Error while killing PID #{pid}. #{bang}"
   end
 
   def start_haproxy
@@ -161,21 +160,24 @@ class HaproxyBuilder # {{{
     file.write "  timeout http-request 90000\n"
     file.write "\n"
 
-    file.write "listen haproxy *:8081\n"
-    file.write "  mode http\n"
-    file.write "  stats enable\n"
-    file.write "  stats uri /\n"
-    file.write "  stats admin if TRUE\n"
-    file.write "  monitor-uri /haproxy?monitor\n"
-    file.write "\n"
+    if @port != 0 then
+      file.write "listen haproxy\n"
+      file.write "  bind #{@bindaddr}:#{@port}\n"
+      file.write "  mode http\n"
+      file.write "  stats enable\n"
+      file.write "  stats uri /\n"
+      file.write "  stats admin if TRUE\n"
+      file.write "  monitor-uri /haproxy?monitor\n"
+      file.write "\n"
+    end
 
     clusters.each do |app_id, cluster|
       # kill the first / and replace any other occurence with a dot
       app_id = app_id.slice(1, app_id.length - 1)
       app_id = app_id.gsub('/', '.')
-      bind_address = "*" # TODO: make configurable
 
-      file.write "listen #{app_id} #{bind_address}:#{cluster.service_port}\n"
+      file.write "listen #{app_id}\n"
+      file.write "  bind #{@bindaddr}:#{cluster.service_port}\n"
       file.write "  balance leastconn\n"
 
       healthcheck_http_uri = '/'    # TODO: load from marathon
@@ -260,14 +262,12 @@ class UpstreamConfDirHandler # {{{
   end
 end # }}}
 class MarathonServiceDiscovery # {{{
-  def initialize(marathon_host, marathon_port, groups, upstream_confd, lb, logger)
+  def initialize(marathon_host, marathon_port, groups, handlers, logger)
     @marathon_host = marathon_host
     @marathon_port = marathon_port
     @groups = groups
     @logger = logger
-
-    @confd = UpstreamConfDirHandler.new(upstream_confd, logger)
-    @lb = lb
+    @handlers = handlers
 
     events_url = "http://#{marathon_host}:#{marathon_port}/v2/events"
     logger.info "Listening on URL #{events_url}"
@@ -331,8 +331,7 @@ private
   def reset_from_tasks(force = false)
     clusters = collect_clusters
 
-    @confd.apply(clusters, force)
-    @lb.apply(clusters, force)
+    @handlers.each {|handler| handler.apply(clusters, force)}
   end
 
   def collect_clusters
@@ -390,6 +389,8 @@ class Mmsd # {{{
                   'haproxy-bin' => '/usr/sbin/haproxy',
                   'haproxy-pidfile' => '/var/run/haproxy.pid',
                   'haproxy-cfg' => '/var/run/haproxy.cfg',
+                  'haproxy-bind' => '0.0.0.0',
+                  'haproxy-port' => '8081',
                   'upstream-confd' => '/var/run/mmsd/confd',
                   'log-level' => 'info'}
 
@@ -441,14 +442,19 @@ class Mmsd # {{{
     logger = Logger.new(STDOUT)
     logger.level = to_loglevel(getopt('log-level'))
 
+    handlers = []
+    handlers << UpstreamConfDirHandler.new(getopt('upstream-confd'), logger)
+    handlers << HaproxyBuilder.new(getopt('haproxy-bin'),
+                                   getopt('haproxy-cfg'),
+                                   getopt('haproxy-pidfile'),
+                                   getopt('haproxy-bind'),
+                                   getopt('haproxy-port').to_i,
+                                   logger)
+
     sd = MarathonServiceDiscovery.new(getopt('marathon-host'),
-                                      getopt('marathon-port'),
+                                      getopt('marathon-port').to_i,
                                       getopt('groups'),
-                                      getopt('upstream-confd'),
-                                      HaproxyBuilder.new(getopt('haproxy-bin'),
-                                                         getopt('haproxy-cfg'),
-                                                         getopt('haproxy-pidfile'),
-                                                         logger),
+                                      handlers,
                                       logger)
     sd.run
   end
