@@ -439,10 +439,20 @@ class Mmsd # {{{
     end
   end
 
+  def quick_shutdown(signo)
+    # FIXME: why is logging from trap context prohibited but puts allowed?
+    puts "Quick Shutdown (#{signo})."
+    exit 0
+  end
+
   def main
     $stdout.sync = true
 
     logger.level = to_loglevel(getopt('log-level'))
+
+    Signal.trap(:SIGINT) {|num| quick_shutdown(num)}
+    Signal.trap(:SIGQUIT) {|num| quick_shutdown(num)}
+    Signal.trap(:SIGTERM) {|num| quick_shutdown(num)}
 
     handlers = []
     handlers << UpstreamConfDirHandler.new(getopt('upstream-confd'), logger)
