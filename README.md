@@ -9,14 +9,15 @@
 - modular handlers
   - haproxy handler to manage a load balancer service
   - upstream-confd handler to manage local upstream config files per application
-- TODO: filter apps to be exposed by load balancer (or service files) via labels
+- filter apps to be exposed by load balancer (or service files) via labels
   from marathon app definitions.
+- first-class docker support.
 - TODO: provide simple rc scripts to run this agent (openrc/upstart/systemd)
 
 ### Start me Up
 
 ```!sh
-mmsg  --marathon-host=localhost --marathon-port=8080
+mmsd  --marathon-host=localhost --marathon-port=8080
 ```
 
 ### Docker Support
