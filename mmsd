@@ -117,7 +117,7 @@ class HaproxyBuilder # {{{
     io = IO.popen(args.join(' '))
     output = io.read
     io.close
-    logger.debug "start haproxy program output: #{output}"
+    logger.debug "start haproxy program output: #{output}" unless output.empty?
   end
 
   def reload_haproxy(pid)
@@ -126,7 +126,7 @@ class HaproxyBuilder # {{{
     io = IO.popen(args.join(' '))
     output = io.read
     io.close
-    logger.debug "reload haproxy program output: #{output}"
+    logger.debug "reload haproxy program output: #{output}" unless output.empty?
   end
 
   def ensure_haproxy
@@ -378,6 +378,8 @@ private
 end
 # }}}
 class Mmsd # {{{
+  attr_accessor :logger
+
   def self.run(argv)
     mmsd = Mmsd.new(argv)
     mmsd.main
@@ -395,6 +397,8 @@ class Mmsd # {{{
                   'log-level' => 'info'}
 
   def initialize(argv)
+    @logger = Logger.new(STDOUT)
+
     @args = read_env(OPT_DEFAULTS)
     parse_args(argv, @args)
   end
@@ -439,7 +443,6 @@ class Mmsd # {{{
   def main
     $stdout.sync = true
 
-    logger = Logger.new(STDOUT)
     logger.level = to_loglevel(getopt('log-level'))
 
     handlers = []
