@@ -206,7 +206,7 @@ class HaproxyBuilder # {{{
       app_id = app_id.slice(1, app_id.length - 1)
       app_id = app_id.gsub('/', '.')
 
-      file.write "listen #{app_id}\n"
+      file.write "listen #{app_id}-#{cluster.service_port}\n"
       file.write "  bind #{@bindaddr}:#{cluster.service_port}\n"
       file.write "  balance leastconn\n"
 
