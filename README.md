@@ -69,3 +69,19 @@ has been spawned on.
 Your application may read them upon startup and whenever this file changes
 (in realtime) to always have an up-to-date list of address:port pairs
 your other application is running on.
+
+### Marathon Label Definitions
+
+Label Name | Value  | Description
+-----------|--------|-------------------------------------------------------
+`lb-group` | `GROUP_NAME` | loadbalancer group this app should be exposed to
+`proto`    | `APP_NAME` | an app type name that identifies the given service, such as redis, smtp, ...
+
+Possible `proto` can be one of:
+
+- `tcp` (default), TCP transport mode and simple TCP-connect health check
+- `http` HTTP transport mode, with HTTP health check
+- `redis` mode tcp and health check is using Redis text protocol
+- `redis-master` same as `redis` but only masters will be healthy
+- `redis-slave` same as `redis` but only slaves will be healthy
+- ... any other interesting text protocols we can map into haproxy?

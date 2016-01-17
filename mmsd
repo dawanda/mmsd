@@ -29,16 +29,16 @@ require 'json'
 
 # The label name that is identifying group filters.
 # The value will be a comma seperated list of groups.
-FILTER_GROUP_NAME = 'group'
+FILTER_GROUP_NAME = 'lb-group'
 
 # {{{ app instance health check
 class HealthCheck
-  def initialize
-    @mode = :http # :http, :tcp, :redis_master, :redis_slave
-    @http_uri = "/"
-    @http_ignore_1xx = true
-    @tcp_send = ""
-    @tcp_expect = ""
+  attr_accessor :protocol, :interval, :http_path
+
+  def initialize(protocol, interval, http_path)
+    @protocol = protocol # http, tcp, redis, redis-master, redis-slave, ...
+    @interval = interval
+    @http_path = http_path
   end
 end
 # }}}
@@ -53,14 +53,16 @@ class AppInstance # {{{
 end
 # }}}
 class AppCluster # {{{
-  attr_accessor :instances, :app_id, :service_port, :mode, :labels
+  attr_accessor :instances, :app_id, :service_port,
+                :protocol, :health_check, :labels
 
-  def initialize(app_id, service_port, mode, labels)
+  def initialize(app_id, service_port, protocol, health_check, labels)
     @instances = []
     @app_id = app_id
     @service_port = service_port
-    @mode = mode
-    @labels = {}
+    @protocol = protocol
+    @health_check = health_check
+    @labels = labels
   end
 
   def add_backend(name, host, port)
@@ -202,6 +204,9 @@ class HaproxyBuilder # {{{
     end
 
     clusters.each do |app_id, cluster|
+      # skip if the transport layer is anything else then TCP (e.g. UDP)
+      next unless cluster.protocol == 'tcp'
+
       # kill the first / and replace any other occurence with a dot
       app_id = app_id.slice(1, app_id.length - 1)
       app_id = app_id.gsub('/', '.')
@@ -210,17 +215,64 @@ class HaproxyBuilder # {{{
       file.write "  bind #{@bindaddr}:#{cluster.service_port}\n"
       file.write "  balance leastconn\n"
 
-      healthcheck_http_uri = '/'    # TODO: load from marathon
-      healthcheck_interval = 10000  # TODO: load from marathon
+      # health check interval defaults to 10s
+      healthcheck_interval =
+          if cluster.health_check && cluster.health_check.interval
+            cluster.health_check.interval * 1000
+          else
+            10 * 1000
+          end
 
-      if cluster.mode == 'http' then
+      app_protocol =
+          if cluster.labels['proto']
+            cluster.labels['proto']
+          elsif cluster.health_check
+            cluster.health_check.protocol
+          else
+            cluster.protocol
+          end
+
+      logger.info "cluster: #{app_id}, proto: #{app_protocol}"
+
+      case app_protocol
+      when 'http'
         file.write "  mode http\n"
         file.write "  option forwardfor\n"
         file.write "  option abortonclose\n"
+        file.write "  option httpchk GET #{cluster.health_check.http_path || '/'}\n"
+        # TODO support custom haproxy option fields
+      when 'redis'
+        file.write "  mode tcp\n"
+        file.write "  option tcp-check\n"
+        file.write "  tcp-check connect\n"
+        file.write "  tcp-check send PING\\r\\n\n"
+        file.write "  tcp-check expect string +PONG\n"
+        file.write "  tcp-check send QUIT\\r\\n\n"
+        file.write "  tcp-check expect string +OK\n"
+      when 'redis-slave'
+        file.write "  mode tcp\n"
+        file.write "  option tcp-check\n"
+        file.write "  tcp-check connect\n"
+        file.write "  tcp-check send PING\\r\\n\n"
+        file.write "  tcp-check expect string +PONG\n"
+        file.write "  tcp-check send info\\ replication\\r\\n\n"
+        file.write "  tcp-check expect string role:slave\n"
+        file.write "  tcp-check send QUIT\\r\\n\n"
+        file.write "  tcp-check expect string +OK\n"
+      when 'redis-master'
+        file.write "  mode tcp\n"
+        file.write "  option tcp-check\n"
+        file.write "  tcp-check connect\n"
+        file.write "  tcp-check send PING\\r\\n\n"
+        file.write "  tcp-check expect string +PONG\n"
+        file.write "  tcp-check send info\\ replication\\r\\n\n"
+        file.write "  tcp-check expect string role:master\n"
+        file.write "  tcp-check send QUIT\\r\\n\n"
+        file.write "  tcp-check expect string +OK\n"
       else
+        # TODO support custom haproxy option fields
         file.write "  mode tcp\n"
       end
-      # TODO support custom haproxy option fields
 
       cluster.instances.each do |i|
         name = i.host.gsub(`domainname`.strip, '').gsub(/\.$/, '') + ":" + i.port.to_s
@@ -368,9 +420,36 @@ private
     @handlers.each {|handler| handler.apply(clusters, force)}
   end
 
-  def get_service_ports(app)
-    (app['container']['docker']['portMappings'] || {}).map do |mapping|
+  def get_service_port(app, index)
+    ports = (app['container']['docker']['portMappings'] || {}).map do |mapping|
       mapping['servicePort']
+    end
+
+    ports[index] || 0
+  end
+
+  def get_service_protocol(app, index)
+    protocols = (app['container']['docker']['portMappings'] || {}).map do |mapping|
+      mapping['protocol']
+    end
+
+    protocols[index] || 'tcp'
+  end
+
+  def get_health_check(app, index)
+    checks = app['healthChecks']
+    return nil unless checks != nil
+
+    check = checks[index]
+    return nil unless check != nil
+
+    case check['protocol']
+    when 'HTTP'
+      HealthCheck.new('http', check['intervalSeconds'].to_i, check['path'])
+    when 'TCP'
+      HealthCheck.new('tcp', check['intervalSeconds'].to_i, nil)
+    else
+      HealthCheck.new('tcp', nil, nil)
     end
   end
 
@@ -388,18 +467,22 @@ private
       groups = ((app['labels'] || {})[FILTER_GROUP_NAME] || '').split(',')
 
       if should_include?(app_id, groups) then
-        service_port = get_service_ports(app)[0] || 0
+        # XXX create LB for first port index only, for now
+        port_index = 0
+
+        service_port = get_service_port(app, port_index)
         next if service_port == 0
 
-        mode = 'tcp' # TODO: one of (tcp, http, ...)
-        labels = app['labels']
-        # TODO: add health check definitions
+        cluster = AppCluster.new(app_id,
+                                 service_port,
+                                 get_service_protocol(app, port_index),
+                                 get_health_check(app, port_index),
+                                 app['labels'])
 
-        cluster = AppCluster.new(app_id, service_port, mode, labels)
         app['tasks'].each do |task|
           name = task['id']
           host = task['host']
-          port = task['ports'][0]
+          port = task['ports'][port_index]
           cluster.add_backend(name, host, port)
         end
 
