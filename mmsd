@@ -232,8 +232,6 @@ class HaproxyBuilder # {{{
             cluster.protocol
           end
 
-      logger.info "cluster: #{app_id}, proto: #{app_protocol}"
-
       case app_protocol
       when 'http'
         file.write "  mode http\n"
