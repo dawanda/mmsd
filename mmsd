@@ -418,6 +418,12 @@ private
     @handlers.each {|handler| handler.apply(clusters, force)}
   end
 
+  # retrieves the number of services in a Marathon App
+  def get_service_count(app)
+    (app['container']['docker']['portMappings'] || {}).count
+  end
+
+  # Retrieves the service port number of a Marathon App at given port index.
   def get_service_port(app, index)
     ports = (app['container']['docker']['portMappings'] || {}).map do |mapping|
       mapping['servicePort']
@@ -465,26 +471,26 @@ private
       groups = ((app['labels'] || {})[FILTER_GROUP_NAME] || '').split(',')
 
       if should_include?(app_id, groups) then
-        # XXX create LB for first port index only, for now
-        port_index = 0
+        get_service_count(app).times do |port_index|
+          service_port = get_service_port(app, port_index)
+          next if service_port == 0
 
-        service_port = get_service_port(app, port_index)
-        next if service_port == 0
+          app_service_name = "#{app_id}-#{port_index}"
 
-        cluster = AppCluster.new(app_id,
-                                 service_port,
-                                 get_service_protocol(app, port_index),
-                                 get_health_check(app, port_index),
-                                 app['labels'])
+          cluster = AppCluster.new(app_service_name,
+                                    service_port,
+                                    get_service_protocol(app, port_index),
+                                    get_health_check(app, port_index),
+                                    app['labels'])
 
-        app['tasks'].each do |task|
-          name = task['id']
-          host = task['host']
-          port = task['ports'][port_index]
-          cluster.add_backend(name, host, port)
+          app['tasks'].each do |task|
+            cluster.add_backend(task['id'],
+                                task['host'],
+                                task['ports'][port_index])
+          end
+
+          clusters[app_service_name] = cluster
         end
-
-        clusters[app_id] = cluster
       end
     end
 
