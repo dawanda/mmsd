@@ -53,20 +53,16 @@ class AppInstance # {{{
 end
 # }}}
 class AppCluster # {{{
-  attr_accessor :instances, :app_id, :service_port,
-                :protocol, :health_check, :labels
+  attr_accessor :app_id, :service_port, :protocol, :health_check,
+                :labels, :instances
 
-  def initialize(app_id, service_port, protocol, health_check, labels)
-    @instances = []
+  def initialize(app_id, service_port, protocol, health_check, labels, instances)
     @app_id = app_id
     @service_port = service_port
     @protocol = protocol
     @health_check = health_check
     @labels = labels
-  end
-
-  def add_backend(name, host, port)
-    @instances << AppInstance.new(name, host, port)
+    @instances = instances
   end
 end
 # }}}
@@ -457,6 +453,7 @@ private
     end
   end
 
+  # TODO: return array instead of map (not needed)
   def collect_clusters
     clusters = {}
 
@@ -477,19 +474,21 @@ private
 
           app_service_name = "#{app_id}-#{port_index}"
 
-          cluster = AppCluster.new(app_service_name,
-                                    service_port,
-                                    get_service_protocol(app, port_index),
-                                    get_health_check(app, port_index),
-                                    app['labels'])
-
+          instances = []
           app['tasks'].each do |task|
-            cluster.add_backend(task['id'],
-                                task['host'],
-                                task['ports'][port_index])
+            instances << AppInstance.new(task['id'],
+                                         task['host'],
+                                         task['ports'][port_index])
           end
 
-          clusters[app_service_name] = cluster
+          clusters[app_service_name] = AppCluster.new(
+              app_service_name,
+              service_port,
+              get_service_protocol(app, port_index),
+              get_health_check(app, port_index),
+              app['labels'],
+              instances)
+
         end
       end
     end
