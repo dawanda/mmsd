@@ -416,7 +416,10 @@ private
 
   # retrieves the number of services in a Marathon App
   def get_service_count(app)
-    (app['container']['docker']['portMappings'] || {}).count
+    return 0 if app['container']['docker'].nil?
+    return 0 if app['container']['docker']['portMappings'].nil?
+
+    app['container']['docker']['portMappings'].count
   end
 
   # Retrieves the service port number of a Marathon App at given port index.
