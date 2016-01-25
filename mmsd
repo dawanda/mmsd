@@ -64,6 +64,16 @@ class AppCluster # {{{
     @labels = labels
     @instances = instances
   end
+
+  def app_protocol
+    if labels['proto']
+      labels['proto']
+    elsif health_check
+      health_check.protocol
+    else
+      protocol
+    end
+  end
 end
 # }}}
 class HaproxyBuilder # {{{
@@ -219,16 +229,7 @@ class HaproxyBuilder # {{{
             10 * 1000
           end
 
-      app_protocol =
-          if cluster.labels['proto']
-            cluster.labels['proto']
-          elsif cluster.health_check
-            cluster.health_check.protocol
-          else
-            cluster.protocol
-          end
-
-      case app_protocol
+      case cluster.app_protocol
       when 'http'
         file.write "  mode http\n"
         file.write "  option forwardfor\n"
@@ -331,8 +332,16 @@ class UpstreamConfDirHandler # {{{
     mode = 0644
 
     File.open(filename, flags, mode) do |file|
+      file.write "Service-Name: #{app_id}\r\n"
+      file.write "Service-Port: #{cluster.service_port}\r\n"
+      file.write "Service-Transport-Proto: #{cluster.protocol}\r\n"
+      file.write "Service-Application-Proto: #{cluster.app_protocol}\r\n"
+      if cluster.health_check != nil then
+        file.write "Health-Check-Proto: #{cluster.health_check.protocol}\r\n"
+      end
+      file.write "\r\n"
       cluster.instances.each do |instance|
-        file.write "#{instance.host}:#{instance.port}\n"
+        file.write "#{instance.host}:#{instance.port}\r\n"
       end
     end
   end

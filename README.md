@@ -58,8 +58,11 @@ into a upstream-confd file with the name `developer.trapni.php.instances`
 with the following content
 
 ```
-Service-Port: number
 Service-Name: token
+Service-Port: number
+Service-Transport-Proto: tcp | udp
+Service-Application-Proto: http | redis | redis-master | ...
+Health-Check-Proto: tcp | http
 
 host1:port1
 host2:port2
