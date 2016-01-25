@@ -58,6 +58,9 @@ into a upstream-confd file with the name `developer.trapni.php.instances`
 with the following content
 
 ```
+Service-Port: number
+Service-Name: token
+
 host1:port1
 host2:port2
 host3:port3

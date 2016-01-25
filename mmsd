@@ -302,16 +302,8 @@ class UpstreamConfDirHandler # {{{
       cfgfile = "#{confd_path}/#{app_id}.instances"
       tmpfile = "#{cfgfile}.tmp"
 
+      write_file(tmpfile, app_id, cluster)
       new_files << cfgfile
-
-      flags = File::CREAT | File::TRUNC | File::WRONLY
-      mode = 0644
-
-      File.open(tmpfile, flags, mode) do |file|
-        cluster.instances.each do |instance|
-          file.write "#{instance.host}:#{instance.port}\n"
-        end
-      end
 
       # only write this file if it changes content (to preserve mtime)
       if !File.exist?(cfgfile) then
@@ -332,6 +324,17 @@ class UpstreamConfDirHandler # {{{
     end
   rescue => bang
     logger.error "[confd] Failed to apply configuration. #{bang}"
+  end
+
+  def write_file(filename, app_id, cluster)
+    flags = File::CREAT | File::TRUNC | File::WRONLY
+    mode = 0644
+
+    File.open(filename, flags, mode) do |file|
+      cluster.instances.each do |instance|
+        file.write "#{instance.host}:#{instance.port}\n"
+      end
+    end
   end
 
   def collect_files
