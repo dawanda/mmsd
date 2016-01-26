@@ -428,6 +428,7 @@ private
 
   # retrieves the number of services in a Marathon App
   def get_service_count(app)
+    return 0 if app['container'].nil?
     return 0 if app['container']['docker'].nil?
     return 0 if app['container']['docker']['portMappings'].nil?
 
