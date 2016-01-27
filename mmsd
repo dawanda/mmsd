@@ -238,7 +238,7 @@ class HaproxyBuilder # {{{
         file.write "  option abortonclose\n"
         file.write "  option httpchk GET #{cluster.health_check.http_path || '/'}\n"
         # TODO support custom haproxy option fields
-      when 'redis'
+      when 'redis-disabled'
         file.write "  mode tcp\n"
         file.write "  option tcp-check\n"
         file.write "  tcp-check connect\n"
@@ -256,7 +256,7 @@ class HaproxyBuilder # {{{
         file.write "  tcp-check expect string role:slave\n"
         file.write "  tcp-check send QUIT\\r\\n\n"
         file.write "  tcp-check expect string +OK\n"
-      when 'redis-master'
+      when 'redis' # 'redis-master'
         file.write "  mode tcp\n"
         file.write "  option tcp-check\n"
         file.write "  tcp-check connect\n"
