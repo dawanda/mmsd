@@ -487,6 +487,8 @@ private
             service_port = service_port[port_index]
           end
 
+          next if service_port < 1024
+
           app_service_name = "#{app_id}-#{port_index}"
 
           instances = []
