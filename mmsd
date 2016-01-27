@@ -31,6 +31,8 @@ require 'json'
 # The value will be a comma seperated list of groups.
 FILTER_GROUP_NAME = 'lb-group'
 
+LB_SERVICE_PORT = 'lb-service-port'
+
 # {{{ app instance health check
 class HealthCheck
   attr_accessor :protocol, :interval, :http_path
@@ -473,12 +475,17 @@ private
     apps.each do |app|
       app_id = app['id'].gsub('/', '.')
 
+      service_ports = ((app['labels'] || {})[LB_SERVICE_PORT] || '').split(',')
       groups = ((app['labels'] || {})[FILTER_GROUP_NAME] || '').split(',')
 
       if should_include?(app_id, groups) then
         get_service_count(app).times do |port_index|
           service_port = get_service_port(app, port_index)
-          next if service_port == 0
+
+          # override service_port in case lb-service-port label was provided
+          if !service_ports.empty? && service_ports[port_index] != 0 then
+            service_port = service_port[port_index]
+          end
 
           app_service_name = "#{app_id}-#{port_index}"
 
