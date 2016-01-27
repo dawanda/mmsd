@@ -30,6 +30,8 @@ require 'json'
 # The label name that is identifying group filters.
 # The value will be a comma seperated list of groups.
 FILTER_GROUP_NAME = 'lb-group'
+LB_PROXY_PROTOCOL = 'lb-proxy-protocol'
+LB_VHOST = 'lb-vhost'
 
 # {{{ app instance health check
 class HealthCheck
@@ -54,14 +56,17 @@ end
 # }}}
 class AppCluster # {{{
   attr_accessor :app_id, :service_port, :protocol, :health_check,
-                :labels, :instances
+                :labels, :vhosts, :proxy_protocol, :instances
 
-  def initialize(app_id, service_port, protocol, health_check, labels, instances)
+  def initialize(app_id, service_port, protocol, health_check, labels,
+                 proxy_protocol, vhosts, instances)
     @app_id = app_id
     @service_port = service_port
     @protocol = protocol
     @health_check = health_check
     @labels = labels
+    @proxy_protocol = proxy_protocol
+    @vhosts = vhosts
     @instances = instances
   end
 
@@ -182,6 +187,32 @@ class HaproxyBuilder # {{{
     end
   end
 
+  def write_config_http(file, port)
+    # TODO
+  end
+
+  def write_config_https(file, port)
+    file.write "frontend https\n"
+    file.write "  bind #{@bindaddr}:#{port}\n"
+    file.write "  mode tcp\n"
+    file.write "  tcp-request inspect-delay 5s\n"
+    file.write "  tcp-request content accept if { req_ssl_hello_type 1 }\n"
+    file.write "\n"
+
+    # TODO: SNI vhost selector
+    file.write "  acl application_1 req_ssl_sni -i application1.domain.com\n"
+    file.write "  acl application_2 req_ssl_sni -i application2.domain.com\n"
+    file.write "\n"
+
+    # TODO: declare vhost backends
+    file.write "  use_backend bk_ssl_application_1 if application_1\n"
+    file.write "  use_backend bk_ssl_application_2 if application_2\n"
+    file.write "\n"
+
+    file.write "  default_backend bk_ssl_default\n"
+    file.write "\n"
+  end
+
   def write_config(filename, clusters)
     logger.debug "HaproxyBuilder.write_config(\"#{filename}\")"
     file = File.open(filename, File::CREAT | File::TRUNC | File::WRONLY, 0644)
@@ -197,6 +228,9 @@ class HaproxyBuilder # {{{
     file.write "  timeout queue 90000\n"
     file.write "  timeout http-request 90000\n"
     file.write "\n"
+
+    write_config_https(file, 443)
+    write_config_http(file, 80)
 
     if @port != 0 then
       file.write "listen haproxy\n"
@@ -482,6 +516,8 @@ private
       app_id = app['id'].gsub('/', '.')
 
       groups = ((app['labels'] || {})[FILTER_GROUP_NAME] || '').split(',')
+      proxy_protocol = ((app['labels'] || {})[LB_PROXY_PROTOCOL] || '')
+      vhosts = ((app['labels'] || {})[LB_VHOST] || '').split(',')
 
       if should_include?(app_id, groups) then
         get_service_count(app).times do |port_index|
@@ -503,8 +539,9 @@ private
               get_service_protocol(app, port_index),
               get_health_check(app, port_index),
               app['labels'],
+              vhosts,
+              proxy_protocol,
               instances)
-
         end
       end
     end
