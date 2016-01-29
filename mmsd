@@ -483,11 +483,12 @@ private
           service_port = get_service_port(app, port_index)
 
           # override service_port in case lb-service-port label was provided
-          if !service_ports.empty? && service_ports[port_index] != 0 then
-            service_port = service_port[port_index]
+          if !service_ports.empty? && service_ports[port_index].to_i != 0 then
+            service_port = service_ports[port_index].to_i
+            logger.debug "[#{app_id}] Override service port via label definition: #{service_port}"
           end
 
-          next if service_port < 1024
+          next if service_port == 0
 
           app_service_name = "#{app_id}-#{port_index}"
 
