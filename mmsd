@@ -238,6 +238,10 @@ class HaproxyBuilder # {{{
         file.write "  option abortonclose\n"
         file.write "  option httpchk GET #{cluster.health_check.http_path || '/'}\n"
         # TODO support custom haproxy option fields
+      when 'smtp'
+        file.write "  mode tcp\n"
+        file.write "  option tcplog\n"
+        file.write "  option smtpchk\n"
       when 'redis-disabled'
         file.write "  mode tcp\n"
         file.write "  option tcp-check\n"
