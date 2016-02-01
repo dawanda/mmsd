@@ -240,8 +240,7 @@ class HaproxyBuilder # {{{
         # TODO support custom haproxy option fields
       when 'smtp'
         file.write "  mode tcp\n"
-        file.write "  option tcplog\n"
-        file.write "  option smtpchk\n"
+        file.write "  option smtpchk EHLO #{ENV['HOSTNAME'] || 'localhost'}\n"
       when 'redis-disabled'
         file.write "  mode tcp\n"
         file.write "  option tcp-check\n"
