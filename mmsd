@@ -232,6 +232,8 @@ class HaproxyBuilder # {{{
     file.write "frontend __gateway_http\n"
     file.write "  bind #{@bindaddr}:#{port}\n"
     file.write "  mode http\n"
+    file.write "  option http-server-close\n"
+    file.write "  reqadd X-Forwarded-Proto:\\ http\n"
     file.write "\n"
 
     suffix_routes = {}
