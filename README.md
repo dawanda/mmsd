@@ -105,13 +105,13 @@ Load-balancer group this app should be exposed to
 ##### Label `lb-vhost` = `VHOST,...`
 list of virtual hosts to be served on gateway port 80
 
-##### Label `lb-vhost-default` | `PORT_INDEX`
+##### Label `lb-vhost-default` = `PORT_INDEX`
 if set, this HTTP application (at port index) will serve as default application on port 80.
 
-##### Label `lb-vhost-ssl` | `VHOST,...`
+##### Label `lb-vhost-ssl` = `VHOST,...`
 list of vhosts to be proxied via SSL, with SNI enabled, but no SSL termination performed.
 
-##### Label `lb-vhost-ssl-default` | `PORT_INDEX`
+##### Label `lb-vhost-ssl-default` = `PORT_INDEX`
 if set, this HTTPS application (at port index) will serve as default application
 on the application gateway's SSL port (usually 443)
 
