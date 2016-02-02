@@ -81,12 +81,12 @@ your other application is running on.
 Label Name | Value  | Description
 -----------|--------|-------------------------------------------------------
 `proto`    | `APP_NAME` | an app type name that identifies the given service, such as redis, smtp, ...
-`lb-proxy-protocol` | `0` \| `1` \| `2` | Enables proxy-protocol to the backend communication (if `1` or `2` is used, no proxy-protocol is used otherwise.
+`lb-proxy-protocol` | `1` \| `2` | Enables proxy-protocol to the backend communication. `1` enables proxy-protocol version 1 (clear text) whereas `2` enables version 2 (binary). Any other value does not activate proxy-protocol.
 `lb-group` | `GROUP_NAME` | loadbalancer group this app should be exposed to
 `lb-vhost` | `VHOST,...` | list of virtual hosts to be served on gateway port 80 and/or 443
 `lb-vhost-default` | `1` | if set to 1, this HTTP application will serve as default application on port 80 and/or 443.
 
-Possible `proto` can be one of:
+Possible `proto` values can be one of:
 
 - `tcp` (default), TCP transport mode and simple TCP-connect health check
 - `http` HTTP transport mode, with HTTP health check

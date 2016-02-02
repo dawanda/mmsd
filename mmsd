@@ -421,8 +421,7 @@ class HaproxyBuilder # {{{
       when 0
         # do nothing
       else
-        logger.warn "Invalid proxy_protocol given for #{app_id}: #{cluster.proxy_protocol}"
-        server_opts = "#{server_opts} send-proxy"
+        logger.warn "Invalid proxy_protocol given for #{app_id}: #{cluster.proxy_protocol} - ignoring."
       end
 
       cluster.instances.
