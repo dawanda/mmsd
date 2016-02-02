@@ -34,6 +34,20 @@ LB_PROXY_PROTOCOL = 'lb-proxy-protocol'
 LB_VHOST = 'lb-vhost'
 LB_SERVICE_PORT = 'lb-service-port'
 
+class Helper # {{{
+ public
+  @@ipv4_cache = {}
+
+  def self.resolve_ipv4(fqdn)
+    @@ipv4_cache[fqdn] ||= `host "#{fqdn}" | awk '{print $NF}'`.strip
+    puts "resolve_ipv4 #{fqdn}: #{@@ipv4_cache[fqdn]}"
+    @@ipv4_cache[fqdn]
+  end
+
+  def self.is_root_user?
+    `id -u`.to_i == 0
+  end
+end # }}}
 # {{{ app instance health check
 class HealthCheck
   attr_accessor :protocol, :interval, :http_path
@@ -199,6 +213,8 @@ class HaproxyBuilder # {{{
   end
 
   def write_config_https(file, port)
+    return # TODO
+
     file.write "frontend https\n"
     file.write "  bind #{@bindaddr}:#{port}\n"
     file.write "  mode tcp\n"
@@ -236,8 +252,12 @@ class HaproxyBuilder # {{{
     file.write "  timeout http-request 90000\n"
     file.write "\n"
 
-    write_config_https(file, 443)
-    write_config_http(file, 80)
+    if Helper.is_root_user?
+      write_config_http(file, 80)
+      write_config_https(file, 443)
+    else
+      logger.warn "Do not expose port 80 and port 443 HTTP gateway. No root user."
+    end
 
     if @port != 0 then
       file.write "listen haproxy\n"
@@ -313,17 +333,22 @@ class HaproxyBuilder # {{{
         file.write "  mode tcp\n"
       end
 
-      server_opts = ""
+      server_opts = "check inter #{healthcheck_interval}"
+
       case cluster.proxy_protocol
-        when 1 server_opts = "#{server_opts} send-proxy"
-        when 2 server_opts = "#{server_opts} send-proxy-v2"
+      when 2
+        server_opts = "#{server_opts} send-proxy-v2"
+      when 1
+        server_opts = "#{server_opts} send-proxy"
+      else
+        server_opts = "#{server_opts} send-proxy"
       end
 
       cluster.instances.each do |i|
         name = i.host.gsub(`domainname`.strip, '').gsub(/\.$/, '') + ":" + i.port.to_s
-        file.write "  server #{name} #{i.host}:#{i.port}" +
+        file.write "  server #{name}" +
+                   " #{Helper.resolve_ipv4(i.host)}:#{i.port}" +
                    " #{server_opts}" +
-                   " check inter #{healthcheck_interval}" +
                    "\n"
       end
       file.write "\n"
