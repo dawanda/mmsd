@@ -30,6 +30,7 @@ require 'json'
 # The label name that is identifying group filters.
 # The value will be a comma seperated list of groups.
 FILTER_GROUP_NAME = 'lb-group'
+LB_ACCEPT_PROXY = 'lb-accept-proxy'
 LB_PROXY_PROTOCOL = 'lb-proxy-protocol'
 LB_VHOST = 'lb-vhost'
 LB_VHOST_DEFAULT = 'lb-vhost-default'
@@ -49,9 +50,10 @@ class Helper # {{{
     name.split('.')[0]
   end
 
-  def self.prettify_app_id(app_id)
+  def self.prettify_app_id(app_id, service_port)
     app_id = app_id.slice(1, app_id.length - 1)
     app_id = app_id.gsub('/', '.')
+    app_id = "#{app_id}-#{service_port}"
   end
 
   def self.is_root_user?
@@ -81,10 +83,11 @@ end
 # }}}
 class AppCluster # {{{
   attr_accessor :app_id, :service_port, :protocol, :health_check,
-                :labels, :vhosts, :vhost_default, :proxy_protocol, :instances
+                :labels, :vhosts, :vhost_default,
+                :accept_proxy, :proxy_protocol, :instances
 
   def initialize(app_id, service_port, protocol, health_check, labels,
-                 vhosts, vhost_default, proxy_protocol, instances)
+                 vhosts, vhost_default, accept_proxy, proxy_protocol, instances)
     @app_id = app_id
     @service_port = service_port
     @protocol = protocol
@@ -92,6 +95,7 @@ class AppCluster # {{{
     @labels = labels
     @vhosts = vhosts
     @vhost_default = vhost_default
+    @accept_proxy = accept_proxy
     @proxy_protocol = proxy_protocol
     @instances = instances
   end
@@ -245,8 +249,7 @@ class HaproxyBuilder # {{{
     vhost_default = ''
 
     clusters.each do |app_id, cluster|
-      app_id = Helper.prettify_app_id(app_id)
-      app_id = "#{app_id}-#{cluster.service_port}"
+      app_id = Helper.prettify_app_id(app_id, cluster.service_port)
 
       cluster.vhosts.each do |vhost|
         match_token = "vhost_#{vhost.gsub('.', '_').gsub('*', 'STAR')}"
@@ -325,9 +328,8 @@ class HaproxyBuilder # {{{
       next unless cluster.protocol == 'tcp'
 
       # kill the first / and replace any other occurence with a dot
-      app_id = Helper.prettify_app_id(app_id)
+      app_id = Helper.prettify_app_id(app_id, cluster.service_port)
 
-      lb_name = "#{app_id}-#{cluster.service_port}"
       app_protocol = if !cluster.vhosts.empty? then
         # force app proto HTTP if virtual hosts have been provided.
         'http'
@@ -335,18 +337,25 @@ class HaproxyBuilder # {{{
         cluster.app_protocol
       end
 
+      bind_opts = ''
+      bind_opts = "#{bind_opts} defer-accept"
+
+      if cluster.accept_proxy > 0 then
+        bind_opts = "#{bind_opts} accept-proxy"
+      end
+
       if app_protocol == 'http' then
-        file.write "frontend __frontend_#{lb_name}\n"
-        file.write "  bind #{@bindaddr}:#{cluster.service_port}\n"
+        file.write "frontend __frontend_#{app_id}\n"
+        file.write "  bind #{@bindaddr}:#{cluster.service_port}#{bind_opts}\n"
         file.write "  option dontlognull\n"
-        file.write "  default_backend #{lb_name}\n"
+        file.write "  default_backend #{app_id}\n"
         file.write "\n"
 
-        file.write "backend #{lb_name}\n"
+        file.write "backend #{app_id}\n"
         file.write "  balance leastconn\n"
       else
-        file.write "listen #{lb_name}\n"
-        file.write "  bind #{@bindaddr}:#{cluster.service_port}\n"
+        file.write "listen #{app_id}\n"
+        file.write "  bind #{@bindaddr}:#{cluster.service_port}#{bind_opts}\n"
         file.write "  option dontlognull\n"
         file.write "  balance leastconn\n"
       end
@@ -624,6 +633,7 @@ private
 
       service_ports = ((app['labels'] || {})[LB_SERVICE_PORT] || '').split(',')
       groups = ((app['labels'] || {})[FILTER_GROUP_NAME] || '').split(',')
+      accept_proxy = ((app['labels'] || {})[LB_ACCEPT_PROXY] || '').to_i
       proxy_protocol = ((app['labels'] || {})[LB_PROXY_PROTOCOL] || '').to_i
       vhost_default = (app['labels'] || {})[LB_VHOST_DEFAULT]
 
@@ -668,6 +678,7 @@ private
               app['labels'],
               selected_vhosts,
               vhost_default != nil && vhost_default.to_i == port_index,
+              accept_proxy,
               proxy_protocol,
               instances)
         end

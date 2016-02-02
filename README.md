@@ -91,6 +91,7 @@ your other application is running on.
 Label Name | Value  | Description
 -----------|--------|-------------------------------------------------------
 `proto`    | `APP_NAME` | an app type name that identifies the given service, such as redis, smtp, ...
+`lb-accept-proxy` | `1` | Enables proxy-protocol on service port.
 `lb-proxy-protocol` | `1` \| `2` | Enables proxy-protocol to the backend communication. `1` enables proxy-protocol version 1 (clear text) whereas `2` enables version 2 (binary). Any other value does not activate proxy-protocol.
 `lb-group` | `GROUP_NAME` | loadbalancer group this app should be exposed to
 `lb-vhost` | `VHOST,...` | list of virtual hosts to be served on gateway port 80 and/or 443
