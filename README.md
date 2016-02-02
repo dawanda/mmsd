@@ -88,18 +88,35 @@ your other application is running on.
 
 ### Marathon Label Definitions
 
-Label Name | Value  | Description
------------|--------|-------------------------------------------------------
-`proto`    | `APP_NAME` | an app type name that identifies the given service, such as redis, smtp, ...
-`lb-accept-proxy` | `1` | Enables proxy-protocol on service port.
-`lb-proxy-protocol` | `1` \| `2` | Enables proxy-protocol to the backend communication. `1` enables proxy-protocol version 1 (clear text) whereas `2` enables version 2 (binary). Any other value does not activate proxy-protocol.
-`lb-group` | `GROUP_NAME` | loadbalancer group this app should be exposed to
-`lb-vhost` | `VHOST,...` | list of virtual hosts to be served on gateway port 80 and/or 443
-`lb-vhost-default` | `PORT_INDEX` | if set, this HTTP application (at port index) will serve as default application on port 80.
-`lb-vhost-ssl` | `VHOST,...` | list of vhosts to be proxied via SSL, with SNI enabled, but no SSL termination performed.
-`lb-vhost-ssl-default` | `PORT_INDEX` | if set, this HTTPS application (at port index) will serve as default application on the application gateway's SSL port (usually 443)
+#### Label `proto` = `APP_PROTO`
+an app type name that identifies the given service, such as redis, smtp, ...
 
-Possible `proto` values can be one of:
+#### Label `lb-accept-proxy` = `1`
+Enables proxy-protocol on service port.
+
+#### Label `lb-proxy-protocol` =  `1` \| `2`
+Enables proxy-protocol to the backend communication. `1` enables proxy-protocol
+version 1 (clear text) whereas `2` enables version 2 (binary).
+Any other value does not activate proxy-protocol.
+
+#### Label `lb-group` = `GROUP_NAME`
+Load-balancer group this app should be exposed to
+
+#### Label `lb-vhost` = `VHOST,...`
+list of virtual hosts to be served on gateway port 80
+
+#### Label `lb-vhost-default` | `PORT_INDEX`
+if set, this HTTP application (at port index) will serve as default application on port 80.
+
+#### Label `lb-vhost-ssl` | `VHOST,...`
+list of vhosts to be proxied via SSL, with SNI enabled, but no SSL termination performed.
+
+
+#### Label `lb-vhost-ssl-default` | `PORT_INDEX`
+if set, this HTTPS application (at port index) will serve as default application
+on the application gateway's SSL port (usually 443)
+
+#### Label `proto`
 
 - `tcp` (default), TCP transport mode and simple TCP-connect health check
 - `http` HTTP transport mode, with HTTP health check
