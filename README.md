@@ -35,15 +35,24 @@ docker run --net=host -d --name mmsd mmsd \
 ```
 mmsd [options]
 
-  --marathon-host=IP      Marathon IP
-  --marathon-port=PORT    Marathon Port
-  --groups=LIST           Comma seperated list of service groups to expose [*].
-  --haproxy-bin=PATH      Path to haproxy binary [/usr/bin/haproxy]
-  --haproxy-pidfile=PATH  Path to haproxy PID file [/var/run/haproxy.pid]
-  --log-level=LEVEL       one of debug, info, warn, error, fatal [info]
-  --upstream-confd=PATH   Path to runtime state dir containing
-                          a file for each Marathon application with a
-                          simple list of hostname:port pairs per line.
+  --marathon-host=IP        Marathon IP
+  --marathon-port=PORT      Marathon Port
+  --filter-groups=LIST      Comma seperated list of service groups to expose [*].
+  --haproxy-bin=PATH        Path to haproxy binary [/usr/bin/haproxy]
+  --haproxy-pidfile=PATH    Path to haproxy PID file [/var/run/haproxy.pid]
+  --haproxy-cfg=PATH        Path to haproxy.cfg [/var/run/haproxy.cfg]
+  --haproxy-bind=IP         Default IP bind [0.0.0.0]
+  --haproxy-port=PORT       haproxy TCP port to the management interface.
+  --gateway-http-port=PORT  HTTP gateway port, enables HTTP gateway on given
+                            port to proxy incoming HTTP requests to the
+                            application by its HTTP request host header.
+  --gateway-https-port=PORT HTTPS gateway port, enables HTTPS gateway on given 
+                            port to proxy incoming HTTP requests to the
+                            application by its HTTP request host header.
+  --upstream-confd=PATH     Path to runtime state dir containing
+                            a file for each Marathon application with a
+                            simple list of hostname:port pairs per line.
+  --log-level=LEVEL         one of debug, info, warn, error, fatal [info]
 
 Every commandline parameter can be also specified as environment variable,
 however, the command line argument takes precedence.
