@@ -35,15 +35,25 @@ docker run --net=host -d --name mmsd mmsd \
 ```
 mmsd [options]
 
-  --marathon-host=IP      Marathon IP
-  --marathon-port=PORT    Marathon Port
-  --groups=LIST           Comma seperated list of service groups to expose [*].
-  --haproxy-bin=PATH      Path to haproxy binary [/usr/bin/haproxy]
-  --haproxy-pidfile=PATH  Path to haproxy PID file [/var/run/haproxy.pid]
-  --log-level=LEVEL       one of debug, info, warn, error, fatal [info]
-  --upstream-confd=PATH   Path to runtime state dir containing
-                          a file for each Marathon application with a
-                          simple list of hostname:port pairs per line.
+  --marathon-host=IP        Marathon IP
+  --marathon-port=PORT      Marathon Port
+  --filter-groups=LIST      Comma seperated list of service groups to expose [*].
+  --haproxy-bin=PATH        Path to haproxy binary [/usr/bin/haproxy]
+  --haproxy-pidfile=PATH    Path to haproxy PID file [/var/run/haproxy.pid]
+  --haproxy-cfg=PATH        Path to haproxy.cfg [/var/run/haproxy.cfg]
+  --haproxy-bind=IP         Default IP bind [0.0.0.0]
+  --haproxy-port=PORT       haproxy TCP port to the management interface.
+  --enable-gateway          Enables HTTP(S) gateway. Disabled by default.
+  --gateway-http-port=PORT  HTTP gateway port, enables HTTP gateway on given
+                            port to proxy incoming HTTP requests to the
+                            application by its HTTP request host header.
+  --gateway-https-port=PORT HTTPS gateway port, enables HTTPS gateway on given 
+                            port to proxy incoming HTTP requests to the
+                            application by its HTTP request host header.
+  --upstream-confd=PATH     Path to runtime state dir containing
+                            a file for each Marathon application with a
+                            simple list of hostname:port pairs per line.
+  --log-level=LEVEL         one of debug, info, warn, error, fatal [info]
 
 Every commandline parameter can be also specified as environment variable,
 however, the command line argument takes precedence.
@@ -80,10 +90,13 @@ your other application is running on.
 
 Label Name | Value  | Description
 -----------|--------|-------------------------------------------------------
-`lb-group` | `GROUP_NAME` | loadbalancer group this app should be exposed to
 `proto`    | `APP_NAME` | an app type name that identifies the given service, such as redis, smtp, ...
+`lb-proxy-protocol` | `1` \| `2` | Enables proxy-protocol to the backend communication. `1` enables proxy-protocol version 1 (clear text) whereas `2` enables version 2 (binary). Any other value does not activate proxy-protocol.
+`lb-group` | `GROUP_NAME` | loadbalancer group this app should be exposed to
+`lb-vhost` | `VHOST,...` | list of virtual hosts to be served on gateway port 80 and/or 443
+`lb-vhost-default` | `1` | if set to 1, this HTTP application will serve as default application on port 80 and/or 443.
 
-Possible `proto` can be one of:
+Possible `proto` values can be one of:
 
 - `tcp` (default), TCP transport mode and simple TCP-connect health check
 - `http` HTTP transport mode, with HTTP health check

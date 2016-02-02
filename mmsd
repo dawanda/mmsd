@@ -30,9 +30,34 @@ require 'json'
 # The label name that is identifying group filters.
 # The value will be a comma seperated list of groups.
 FILTER_GROUP_NAME = 'lb-group'
-
+LB_PROXY_PROTOCOL = 'lb-proxy-protocol'
+LB_VHOST = 'lb-vhost'
+LB_VHOST_DEFAULT = 'lb-vhost-default'
 LB_SERVICE_PORT = 'lb-service-port'
 
+class Helper # {{{
+ public
+  @@ipv4_cache = {}
+
+  def self.resolve_ipv4(fqdn)
+    @@ipv4_cache[fqdn] ||= `host "#{fqdn}" | awk '{print $NF}'`.strip
+    @@ipv4_cache[fqdn]
+  end
+
+  def self.prettify_dns_name(name)
+    # name.gsub(`domainname`.strip, '').gsub(/\.$/, '')
+    name.split('.')[0]
+  end
+
+  def self.prettify_app_id(app_id)
+    app_id = app_id.slice(1, app_id.length - 1)
+    app_id = app_id.gsub('/', '.')
+  end
+
+  def self.is_root_user?
+    `id -u`.to_i == 0
+  end
+end # }}}
 # {{{ app instance health check
 class HealthCheck
   attr_accessor :protocol, :interval, :http_path
@@ -56,14 +81,18 @@ end
 # }}}
 class AppCluster # {{{
   attr_accessor :app_id, :service_port, :protocol, :health_check,
-                :labels, :instances
+                :labels, :vhosts, :vhost_default, :proxy_protocol, :instances
 
-  def initialize(app_id, service_port, protocol, health_check, labels, instances)
+  def initialize(app_id, service_port, protocol, health_check, labels,
+                 vhosts, vhost_default, proxy_protocol, instances)
     @app_id = app_id
     @service_port = service_port
     @protocol = protocol
     @health_check = health_check
     @labels = labels
+    @vhosts = vhosts
+    @vhost_default = vhost_default
+    @proxy_protocol = proxy_protocol
     @instances = instances
   end
 
@@ -79,14 +108,18 @@ class AppCluster # {{{
 end
 # }}}
 class HaproxyBuilder # {{{
-  attr_accessor :binpath, :cfgfile, :pidfile, :bindaddr, :logger
+  attr_accessor :binpath, :cfgfile, :pidfile, :bindaddr, :logger,
+                :gateway_http_port, :gateway_https_port
 
-  def initialize(binpath, cfgfile, pidfile, bindaddr, port, logger)
+  def initialize(binpath, cfgfile, pidfile, bindaddr, port,
+                 gateway_http_port, gateway_https_port, logger)
     @binpath = binpath
     @cfgfile = cfgfile
     @pidfile = pidfile
     @bindaddr = bindaddr
     @port = port
+    @gateway_http_port = gateway_http_port
+    @gateway_https_port = gateway_https_port
     @logger = logger
   end
 
@@ -110,8 +143,8 @@ class HaproxyBuilder # {{{
       FileUtils.rm(tmpfile)
       ensure_haproxy if force
     end
-  rescue => bang
-    logger.error "[haproxy] Failed to apply configuration. #{bang}"
+  rescue => ex
+    logger.error "#{ex.backtrace}: #{ex.message} (#{ex.class})"
   end
 
   def valid_pid?(pid)
@@ -184,6 +217,87 @@ class HaproxyBuilder # {{{
     end
   end
 
+  def write_config_mgnt(file, bindaddr, port)
+    file.write "listen haproxy\n"
+    file.write "  bind #{bindaddr}:#{port}\n"
+    file.write "  mode http\n"
+    file.write "  stats enable\n"
+    file.write "  stats uri /\n"
+    file.write "  stats admin if TRUE\n"
+    file.write "  monitor-uri /haproxy?monitor\n"
+    file.write "\n"
+  end
+
+  def write_config_http(clusters, file, port)
+    file.write "frontend __gateway_http\n"
+    file.write "  bind #{@bindaddr}:#{port}\n"
+    file.write "  mode http\n"
+    file.write "\n"
+
+    suffix_routes = {}
+    suffix_matches = []
+
+    exact_routes = {}
+    exact_matches = []
+
+    vhost_default = ''
+
+    clusters.each do |app_id, cluster|
+      app_id = Helper.prettify_app_id(app_id)
+      app_id = "#{app_id}-#{cluster.service_port}"
+
+      cluster.vhosts.each do |vhost|
+        match_token = "vhost_#{vhost.gsub('.', '_').gsub('*', 'STAR')}"
+        if vhost =~ /^\*\./ then
+          suffix_matches << "  acl #{match_token} hdr_dom(host) -i #{vhost.split('.', 2)[1]}\n"
+          suffix_routes[match_token] = app_id
+        else
+          exact_matches << "  acl #{match_token} hdr(host) -i #{vhost}:#{port}\n"
+          exact_routes[match_token] = app_id
+        end
+      end
+
+      vhost_default = app_id if cluster.vhost_default
+    end
+
+    exact_matches.each {|line| file.write line}
+    suffix_matches.each {|line| file.write line}
+    file.write "\n" unless suffix_matches.empty? && exact_matches.empty?
+
+    exact_routes.each {|acl, app| file.write "  use_backend #{app} if #{acl}\n"}
+    suffix_routes.each {|acl, app| file.write "  use_backend #{app} if #{acl}\n"}
+    file.write "\n"
+
+    if vhost_default != "" then
+      file.write "  default_backend #{vhost_default}\n"
+      file.write "\n"
+    end
+  end
+
+  def write_config_https(clusters, file, port)
+    return # TODO
+
+    file.write "frontend __gateway_https\n"
+    file.write "  bind #{@bindaddr}:#{port}\n"
+    file.write "  mode tcp\n"
+    file.write "  tcp-request inspect-delay 5s\n"
+    file.write "  tcp-request content accept if { req_ssl_hello_type 1 }\n"
+    file.write "\n"
+
+    # TODO: SNI vhost selector
+    file.write "  acl application_1 req_ssl_sni -i application1.domain.com\n"
+    file.write "  acl application_2 req_ssl_sni -i application2.domain.com\n"
+    file.write "\n"
+
+    # TODO: declare vhost backends
+    file.write "  use_backend bk_ssl_application_1 if application_1\n"
+    file.write "  use_backend bk_ssl_application_2 if application_2\n"
+    file.write "\n"
+
+    file.write "  default_backend bk_ssl_default\n"
+    file.write "\n"
+  end
+
   def write_config(filename, clusters)
     logger.debug "HaproxyBuilder.write_config(\"#{filename}\")"
     file = File.open(filename, File::CREAT | File::TRUNC | File::WRONLY, 0644)
@@ -200,28 +314,40 @@ class HaproxyBuilder # {{{
     file.write "  timeout http-request 90000\n"
     file.write "\n"
 
-    if @port != 0 then
-      file.write "listen haproxy\n"
-      file.write "  bind #{@bindaddr}:#{@port}\n"
-      file.write "  mode http\n"
-      file.write "  stats enable\n"
-      file.write "  stats uri /\n"
-      file.write "  stats admin if TRUE\n"
-      file.write "  monitor-uri /haproxy?monitor\n"
-      file.write "\n"
-    end
+    write_config_mgnt(file, @bindaddr, @port) if @port != 0
+    write_config_http(clusters, file, @gateway_http_port) if @gateway_http_port > 0
+    write_config_https(clusters, file, @gateway_https_port) if @gateway_https_port > 0
 
     clusters.each do |app_id, cluster|
       # skip if the transport layer is anything else then TCP (e.g. UDP)
       next unless cluster.protocol == 'tcp'
 
       # kill the first / and replace any other occurence with a dot
-      app_id = app_id.slice(1, app_id.length - 1)
-      app_id = app_id.gsub('/', '.')
+      app_id = Helper.prettify_app_id(app_id)
 
-      file.write "listen #{app_id}-#{cluster.service_port}\n"
-      file.write "  bind #{@bindaddr}:#{cluster.service_port}\n"
-      file.write "  balance leastconn\n"
+      lb_name = "#{app_id}-#{cluster.service_port}"
+      app_protocol = if !cluster.vhosts.empty? then
+        # force app proto HTTP if virtual hosts have been provided.
+        'http'
+      else
+        cluster.app_protocol
+      end
+
+      if app_protocol == 'http' then
+        file.write "frontend __frontend_#{lb_name}\n"
+        file.write "  bind #{@bindaddr}:#{cluster.service_port}\n"
+        file.write "  option dontlognull\n"
+        file.write "  default_backend #{lb_name}\n"
+        file.write "\n"
+
+        file.write "backend #{lb_name}\n"
+        file.write "  balance leastconn\n"
+      else
+        file.write "listen #{lb_name}\n"
+        file.write "  bind #{@bindaddr}:#{cluster.service_port}\n"
+        file.write "  option dontlognull\n"
+        file.write "  balance leastconn\n"
+      end
 
       # health check interval defaults to 10s
       healthcheck_interval =
@@ -231,16 +357,18 @@ class HaproxyBuilder # {{{
             10 * 1000
           end
 
-      case cluster.app_protocol
+      case app_protocol
       when 'http'
         file.write "  mode http\n"
         file.write "  option forwardfor\n"
         file.write "  option abortonclose\n"
+        file.write "  option redispatch\n"
         file.write "  option httpchk GET #{cluster.health_check.http_path || '/'}\n"
+        file.write "  retries 3\n"
         # TODO support custom haproxy option fields
       when 'smtp'
         file.write "  mode tcp\n"
-        file.write "  option smtpchk EHLO #{ENV['HOSTNAME'] || 'localhost'}\n"
+        file.write "  option smtpchk EHLO #{ENV['HOST'] || ENV['HOSTNAME'] || 'localhost'}\n"
       when 'redis-disabled'
         file.write "  mode tcp\n"
         file.write "  option tcp-check\n"
@@ -274,10 +402,25 @@ class HaproxyBuilder # {{{
         file.write "  mode tcp\n"
       end
 
-      cluster.instances.each do |i|
-        name = i.host.gsub(`domainname`.strip, '').gsub(/\.$/, '') + ":" + i.port.to_s
-        file.write "  server #{name} #{i.host}:#{i.port}" +
-                   " check inter #{healthcheck_interval}" +
+      server_opts = "check inter #{healthcheck_interval}"
+      case cluster.proxy_protocol
+      when 2
+        server_opts = "#{server_opts} send-proxy-v2"
+      when 1
+        server_opts = "#{server_opts} send-proxy"
+      when 0
+        # do nothing
+      else
+        logger.warn "Invalid proxy_protocol given for #{app_id}: #{cluster.proxy_protocol} - ignoring."
+      end
+
+      cluster.instances.
+          sort {|a, b| a.host.scan(/\d+/).map(&:to_i) <=>
+                       b.host.scan(/\d+/).map(&:to_i)}.
+          each do |i|
+        file.write "  server #{Helper.prettify_dns_name(i.host)}:#{i.port}" +
+                   " #{Helper.resolve_ipv4(i.host)}:#{i.port}" +
+                   " #{server_opts}" +
                    "\n"
       end
       file.write "\n"
@@ -302,8 +445,7 @@ class UpstreamConfDirHandler # {{{
 
     clusters.each do |app_id, cluster|
       # kill the first / and replace any other occurence with a dot
-      app_id = app_id.slice(1, app_id.length - 1)
-      app_id = app_id.gsub('/', '.')
+      app_id = Helper.prettify_app_id(app_id)
 
       cfgfile = "#{confd_path}/#{app_id}.instances"
       tmpfile = "#{cfgfile}.tmp"
@@ -480,6 +622,15 @@ private
 
       service_ports = ((app['labels'] || {})[LB_SERVICE_PORT] || '').split(',')
       groups = ((app['labels'] || {})[FILTER_GROUP_NAME] || '').split(',')
+      proxy_protocol = ((app['labels'] || {})[LB_PROXY_PROTOCOL] || '').to_i
+      vhost_default = (app['labels'] || {})[LB_VHOST_DEFAULT]
+
+      vhost_defs = ((app['labels'] || {})[LB_VHOST] || '').split(',')
+      indexed_vhosts = vhost_defs.inject([]) do |result, vhost_def|
+        fields = vhost_def.split(':')
+        fields[1] = fields.size == 1 ? 0 : fields[1].to_i
+        result << fields
+      end
 
       if should_include?(app_id, groups) then
         get_service_count(app).times do |port_index|
@@ -496,6 +647,10 @@ private
 
           app_service_name = "#{app_id}-#{port_index}"
 
+          selected_vhosts =
+              indexed_vhosts.select {|vhost| vhost[1] == port_index}.
+              map {|indexed_vhost| indexed_vhost[0]}
+
           instances = []
           app['tasks'].each do |task|
             instances << AppInstance.new(task['id'],
@@ -509,8 +664,10 @@ private
               get_service_protocol(app, port_index),
               get_health_check(app, port_index),
               app['labels'],
+              selected_vhosts,
+              vhost_default != nil && vhost_default.to_i == port_index,
+              proxy_protocol,
               instances)
-
         end
       end
     end
@@ -554,6 +711,9 @@ class Mmsd # {{{
                   'haproxy-cfg' => '/var/run/haproxy.cfg',
                   'haproxy-bind' => '0.0.0.0',
                   'haproxy-port' => '8081',
+                  'enable-gateway' => '',
+                  'gateway-http-port' => '80',
+                  'gateway-https-port' => '443',
                   'upstream-confd' => '/var/run/mmsd/confd',
                   'log-level' => 'info'}
 
@@ -579,9 +739,16 @@ class Mmsd # {{{
 
   def parse_args(argv, opts)
     argv.each do |arg|
-      name, value = arg.split('=')
-      name.gsub!(/^--/, '')
-      opts[name] = value
+      fields = arg.split('=')
+      if fields.count == 2 then
+        name, value = arg.split('=')
+        name.gsub!(/^--/, '')
+        opts[name] = value
+      else
+        name = arg.gsub(/^--/, '')
+        logger.debug "parse_args: #{name} = true"
+        opts[name] = 'true'
+      end
     end
   end
 
@@ -615,6 +782,18 @@ class Mmsd # {{{
     Signal.trap(:SIGQUIT) {|num| quick_shutdown(num)}
     Signal.trap(:SIGTERM) {|num| quick_shutdown(num)}
 
+    gateway_http_port = if getopt('enable-gateway') == 'true' then
+      getopt('gateway-http-port').to_i
+    else
+      0
+    end
+
+    gateway_https_port = if getopt('enable-gateway') == 'true' then
+      getopt('gateway-https-port').to_i
+    else
+      0
+    end
+
     handlers = []
     handlers << UpstreamConfDirHandler.new(getopt('upstream-confd'), logger)
     handlers << HaproxyBuilder.new(getopt('haproxy-bin'),
@@ -622,6 +801,8 @@ class Mmsd # {{{
                                    getopt('haproxy-pidfile'),
                                    getopt('haproxy-bind'),
                                    getopt('haproxy-port').to_i,
+                                   gateway_http_port,
+                                   gateway_https_port,
                                    logger)
 
     sd = MarathonServiceDiscovery.new(getopt('marathon-host'),
