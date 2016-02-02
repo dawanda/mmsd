@@ -108,14 +108,18 @@ class AppCluster # {{{
 end
 # }}}
 class HaproxyBuilder # {{{
-  attr_accessor :binpath, :cfgfile, :pidfile, :bindaddr, :logger
+  attr_accessor :binpath, :cfgfile, :pidfile, :bindaddr, :logger,
+                :gateway_http_port, :gateway_https_port
 
-  def initialize(binpath, cfgfile, pidfile, bindaddr, port, logger)
+  def initialize(binpath, cfgfile, pidfile, bindaddr, port,
+                 gateway_http_port, gateway_https_port, logger)
     @binpath = binpath
     @cfgfile = cfgfile
     @pidfile = pidfile
     @bindaddr = bindaddr
     @port = port
+    @gateway_http_port = gateway_http_port
+    @gateway_https_port = gateway_https_port
     @logger = logger
   end
 
@@ -213,6 +217,17 @@ class HaproxyBuilder # {{{
     end
   end
 
+  def write_config_mgnt(file, bindaddr, port)
+    file.write "listen haproxy\n"
+    file.write "  bind #{bindaddr}:#{port}\n"
+    file.write "  mode http\n"
+    file.write "  stats enable\n"
+    file.write "  stats uri /\n"
+    file.write "  stats admin if TRUE\n"
+    file.write "  monitor-uri /haproxy?monitor\n"
+    file.write "\n"
+  end
+
   def write_config_http(clusters, file, port)
     file.write "frontend __gateway_http\n"
     file.write "  bind #{@bindaddr}:#{port}\n"
@@ -299,34 +314,9 @@ class HaproxyBuilder # {{{
     file.write "  timeout http-request 90000\n"
     file.write "\n"
 
-    # TODO: write only if --enable-http-gateway is provided
-    # TODO: use --http-gateway-port=PORT
-    http_gateway_port = if Helper.is_root_user? then
-      80
-    else
-      8080
-    end
-    write_config_http(clusters, file, http_gateway_port)
-
-    # TODO: write only if --enable-https-gateway is provided, require >=1 certs then
-    # TODO: use --https-gateway-port=PORT
-    https_gateway_port = if Helper.is_root_user? then
-      443
-    else
-      1443
-    end
-    write_config_https(clusters, file, https_gateway_port)
-
-    if @port != 0 then
-      file.write "listen haproxy\n"
-      file.write "  bind #{@bindaddr}:#{@port}\n"
-      file.write "  mode http\n"
-      file.write "  stats enable\n"
-      file.write "  stats uri /\n"
-      file.write "  stats admin if TRUE\n"
-      file.write "  monitor-uri /haproxy?monitor\n"
-      file.write "\n"
-    end
+    write_config_mgnt(file, @bindaddr, @port) if @port != 0
+    write_config_http(clusters, file, @gateway_http_port) if @gateway_http_port > 0
+    write_config_https(clusters, file, @gateway_https_port) if @gateway_https_port > 0
 
     clusters.each do |app_id, cluster|
       # skip if the transport layer is anything else then TCP (e.g. UDP)
@@ -711,8 +701,8 @@ class Mmsd # {{{
                   'haproxy-cfg' => '/var/run/haproxy.cfg',
                   'haproxy-bind' => '0.0.0.0',
                   'haproxy-port' => '8081',
-                  'enable-http' => '',
-                  'enable-https' => '',
+                  'gateway-http-port' => '80',
+                  'gateway-https-port' => '443',
                   'upstream-confd' => '/var/run/mmsd/confd',
                   'log-level' => 'info'}
 
@@ -781,6 +771,8 @@ class Mmsd # {{{
                                    getopt('haproxy-pidfile'),
                                    getopt('haproxy-bind'),
                                    getopt('haproxy-port').to_i,
+                                   getopt('gateway-http-port').to_i,
+                                   getopt('gateway-https-port').to_i,
                                    logger)
 
     sd = MarathonServiceDiscovery.new(getopt('marathon-host'),
