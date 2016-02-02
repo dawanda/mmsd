@@ -55,7 +55,7 @@ mmsd [options]
                             simple list of hostname:port pairs per line.
   --log-level=LEVEL         one of debug, info, warn, error, fatal [info]
 
-Every commandline parameter can be also specified as environment variable,
+Every command-line parameter can be also specified as environment variable,
 however, the command line argument takes precedence.
 Environment variables are upper case, without leading dashes, and mid-dashes
 represented as underscores.
