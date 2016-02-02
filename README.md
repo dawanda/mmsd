@@ -119,6 +119,7 @@ on the application gateway's SSL port (usually 443)
 
 - `tcp` (default), TCP transport mode and simple TCP-connect health check
 - `http` HTTP transport mode, with HTTP health check
+- `smtp` SMTP protococol, enables SMTP-restrictive health check.
 - `redis` mode tcp and health check is using Redis text protocol
 - `redis-master` same as `redis` but only masters will be healthy
 - `redis-slave` same as `redis` but only slaves will be healthy
