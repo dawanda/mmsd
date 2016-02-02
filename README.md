@@ -80,8 +80,11 @@ your other application is running on.
 
 Label Name | Value  | Description
 -----------|--------|-------------------------------------------------------
-`lb-group` | `GROUP_NAME` | loadbalancer group this app should be exposed to
 `proto`    | `APP_NAME` | an app type name that identifies the given service, such as redis, smtp, ...
+`lb-proxy-protocol` | `0` \| `1` \| `2` | Enables proxy-protocol to the backend communication (if `1` or `2` is used, no proxy-protocol is used otherwise.
+`lb-group` | `GROUP_NAME` | loadbalancer group this app should be exposed to
+`lb-vhost` | `VHOST,...` | list of virtual hosts to be served on gateway port 80 and/or 443
+`lb-vhost-default` | `1` | if set to 1, this HTTP application will serve as default application on port 80 and/or 443.
 
 Possible `proto` can be one of:
 
