@@ -95,7 +95,9 @@ Label Name | Value  | Description
 `lb-proxy-protocol` | `1` \| `2` | Enables proxy-protocol to the backend communication. `1` enables proxy-protocol version 1 (clear text) whereas `2` enables version 2 (binary). Any other value does not activate proxy-protocol.
 `lb-group` | `GROUP_NAME` | loadbalancer group this app should be exposed to
 `lb-vhost` | `VHOST,...` | list of virtual hosts to be served on gateway port 80 and/or 443
-`lb-vhost-default` | `1` | if set to 1, this HTTP application will serve as default application on port 80 and/or 443.
+`lb-vhost-default` | `PORT_INDEX` | if set, this HTTP application (at port index) will serve as default application on port 80.
+`lb-vhost-ssl` | `VHOST,...` | list of vhosts to be proxied via SSL, with SNI enabled, but no SSL termination performed.
+`lb-vhost-ssl-default` | `PORT_INDEX` | if set, this HTTPS application (at port index) will serve as default application on the application gateway's SSL port (usually 443)
 
 Possible `proto` values can be one of:
 
