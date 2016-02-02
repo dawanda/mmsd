@@ -143,8 +143,8 @@ class HaproxyBuilder # {{{
       FileUtils.rm(tmpfile)
       ensure_haproxy if force
     end
-  rescue => bang
-    logger.error "[haproxy] Failed to apply configuration. #{bang}"
+  rescue => ex
+    logger.error "#{ex.backtrace}: #{ex.message} (#{ex.class})"
   end
 
   def valid_pid?(pid)
@@ -623,8 +623,14 @@ private
       service_ports = ((app['labels'] || {})[LB_SERVICE_PORT] || '').split(',')
       groups = ((app['labels'] || {})[FILTER_GROUP_NAME] || '').split(',')
       proxy_protocol = ((app['labels'] || {})[LB_PROXY_PROTOCOL] || '').to_i
-      vhosts = ((app['labels'] || {})[LB_VHOST] || '').split(',')
-      vhost_default = ((app['labels'] || {})[LB_VHOST_DEFAULT] || '') == '1'
+      vhost_default = (app['labels'] || {})[LB_VHOST_DEFAULT]
+
+      vhost_defs = ((app['labels'] || {})[LB_VHOST] || '').split(',')
+      indexed_vhosts = vhost_defs.inject([]) do |result, vhost_def|
+        fields = vhost_def.split(':')
+        fields[1] = fields.size == 1 ? 0 : fields[1].to_i
+        result << fields
+      end
 
       if should_include?(app_id, groups) then
         get_service_count(app).times do |port_index|
@@ -641,6 +647,10 @@ private
 
           app_service_name = "#{app_id}-#{port_index}"
 
+          selected_vhosts =
+              indexed_vhosts.select {|vhost| vhost[1] == port_index}.
+              map {|indexed_vhost| indexed_vhost[0]}
+
           instances = []
           app['tasks'].each do |task|
             instances << AppInstance.new(task['id'],
@@ -654,8 +664,8 @@ private
               get_service_protocol(app, port_index),
               get_health_check(app, port_index),
               app['labels'],
-              vhosts,
-              vhost_default,
+              selected_vhosts,
+              vhost_default != nil && vhost_default.to_i == port_index,
               proxy_protocol,
               instances)
         end
@@ -701,6 +711,7 @@ class Mmsd # {{{
                   'haproxy-cfg' => '/var/run/haproxy.cfg',
                   'haproxy-bind' => '0.0.0.0',
                   'haproxy-port' => '8081',
+                  'enable-gateway' => '',
                   'gateway-http-port' => '80',
                   'gateway-https-port' => '443',
                   'upstream-confd' => '/var/run/mmsd/confd',
@@ -728,9 +739,16 @@ class Mmsd # {{{
 
   def parse_args(argv, opts)
     argv.each do |arg|
-      name, value = arg.split('=')
-      name.gsub!(/^--/, '')
-      opts[name] = value
+      fields = arg.split('=')
+      if fields.count == 2 then
+        name, value = arg.split('=')
+        name.gsub!(/^--/, '')
+        opts[name] = value
+      else
+        name = arg.gsub(/^--/, '')
+        logger.debug "parse_args: #{name} = true"
+        opts[name] = 'true'
+      end
     end
   end
 
@@ -764,6 +782,18 @@ class Mmsd # {{{
     Signal.trap(:SIGQUIT) {|num| quick_shutdown(num)}
     Signal.trap(:SIGTERM) {|num| quick_shutdown(num)}
 
+    gateway_http_port = if getopt('enable-gateway') == 'true' then
+      getopt('gateway-http-port').to_i
+    else
+      0
+    end
+
+    gateway_https_port = if getopt('enable-gateway') == 'true' then
+      getopt('gateway-https-port').to_i
+    else
+      0
+    end
+
     handlers = []
     handlers << UpstreamConfDirHandler.new(getopt('upstream-confd'), logger)
     handlers << HaproxyBuilder.new(getopt('haproxy-bin'),
@@ -771,8 +801,8 @@ class Mmsd # {{{
                                    getopt('haproxy-pidfile'),
                                    getopt('haproxy-bind'),
                                    getopt('haproxy-port').to_i,
-                                   getopt('gateway-http-port').to_i,
-                                   getopt('gateway-https-port').to_i,
+                                   gateway_http_port,
+                                   gateway_https_port,
                                    logger)
 
     sd = MarathonServiceDiscovery.new(getopt('marathon-host'),

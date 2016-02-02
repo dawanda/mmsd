@@ -43,6 +43,7 @@ mmsd [options]
   --haproxy-cfg=PATH        Path to haproxy.cfg [/var/run/haproxy.cfg]
   --haproxy-bind=IP         Default IP bind [0.0.0.0]
   --haproxy-port=PORT       haproxy TCP port to the management interface.
+  --enable-gateway          Enables HTTP(S) gateway. Disabled by default.
   --gateway-http-port=PORT  HTTP gateway port, enables HTTP gateway on given
                             port to proxy incoming HTTP requests to the
                             application by its HTTP request host header.
