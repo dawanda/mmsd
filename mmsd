@@ -34,6 +34,8 @@ LB_ACCEPT_PROXY = 'lb-accept-proxy'
 LB_PROXY_PROTOCOL = 'lb-proxy-protocol'
 LB_VHOST = 'lb-vhost'
 LB_VHOST_DEFAULT = 'lb-vhost-default'
+LB_VHOST_SSL = 'lb-vhost-ssl'
+LB_VHOST_SSL_DEFAULT = 'lb-vhost-ssl-default'
 LB_SERVICE_PORT = 'lb-service-port'
 
 class Helper # {{{
@@ -82,17 +84,20 @@ class AppInstance # {{{
 end
 # }}}
 class AppCluster # {{{
-  attr_accessor :app_id, :service_port, :protocol, :health_check,
-                :labels, :vhosts, :vhost_default,
+  attr_accessor :app_id, :service_port, :protocol, :health_check, :labels,
+                :vhosts_ssl, :vhost_ssl_default, :vhosts, :vhost_default,
                 :accept_proxy, :proxy_protocol, :instances
 
   def initialize(app_id, service_port, protocol, health_check, labels,
-                 vhosts, vhost_default, accept_proxy, proxy_protocol, instances)
+                 vhosts_ssl, vhost_ssl_default, vhosts, vhost_default,
+                 accept_proxy, proxy_protocol, instances)
     @app_id = app_id
     @service_port = service_port
     @protocol = protocol
     @health_check = health_check
     @labels = labels
+    @vhosts_ssl = vhosts_ssl
+    @vhost_ssl_default = vhost_ssl_default
     @vhosts = vhosts
     @vhost_default = vhost_default
     @accept_proxy = accept_proxy
@@ -232,9 +237,9 @@ class HaproxyBuilder # {{{
     file.write "\n"
   end
 
-  def write_config_http(clusters, file, port)
+  def write_config_http(file, clusters, bindaddr, port)
     file.write "frontend __gateway_http\n"
-    file.write "  bind #{@bindaddr}:#{port}\n"
+    file.write "  bind #{bindaddr}:#{port}\n"
     file.write "  mode http\n"
     file.write "  option http-server-close\n"
     file.write "  reqadd X-Forwarded-Proto:\\ http\n"
@@ -279,28 +284,55 @@ class HaproxyBuilder # {{{
     end
   end
 
-  def write_config_https(clusters, file, port)
-    return # TODO
+  # helper: http://serverfault.com/questions/662662/haproxy-with-sni-and-different-ssl-settings
+  def write_config_https(file, clusters, bindaddr, port)
+    # SNI vhost selector
+    suffix_routes = {}
+    suffix_matches = []
+    exact_routes = {}
+    exact_matches = []
+    vhost_default = ''
+    clusters.each do |app_id, cluster|
+      app_id = Helper.prettify_app_id(app_id, cluster.service_port)
 
+      cluster.vhosts_ssl.each do |vhost|
+        match_token = "vhost_ssl_#{vhost.gsub('.', '_').gsub('*', 'STAR')}"
+        if vhost =~ /^\*\./ then
+          suffix_matches << "  acl #{match_token} req_ssl_sni -m dom #{vhost.split('.', 2)[1]}\n"
+          suffix_routes[match_token] = app_id
+        else
+          exact_matches << "  acl #{match_token} req_ssl_sni -i #{vhost}\n"
+          exact_routes[match_token] = app_id
+        end
+      end
+
+      vhost_default = app_id if cluster.vhost_ssl_default
+    end
+
+    return if exact_matches.empty? || suffix_matches.empty?
+
+    # write header
     file.write "frontend __gateway_https\n"
-    file.write "  bind #{@bindaddr}:#{port}\n"
+    file.write "  bind #{bindaddr}:#{port}\n"
     file.write "  mode tcp\n"
     file.write "  tcp-request inspect-delay 5s\n"
     file.write "  tcp-request content accept if { req_ssl_hello_type 1 }\n"
     file.write "\n"
 
-    # TODO: SNI vhost selector
-    file.write "  acl application_1 req_ssl_sni -i application1.domain.com\n"
-    file.write "  acl application_2 req_ssl_sni -i application2.domain.com\n"
+    # write ACL statements
+    exact_matches.each {|line| file.write line}
+    suffix_matches.each {|line| file.write line}
+    file.write "\n" unless suffix_matches.empty? && exact_matches.empty?
+
+    # write use_backend statements
+    exact_routes.each {|acl, app| file.write "  use_backend #{app} if #{acl}\n"}
+    suffix_routes.each {|acl, app| file.write "  use_backend #{app} if #{acl}\n"}
     file.write "\n"
 
-    # TODO: declare vhost backends
-    file.write "  use_backend bk_ssl_application_1 if application_1\n"
-    file.write "  use_backend bk_ssl_application_2 if application_2\n"
-    file.write "\n"
-
-    file.write "  default_backend bk_ssl_default\n"
-    file.write "\n"
+    if vhost_default != "" then
+      file.write "  default_backend #{vhost_default}\n"
+      file.write "\n"
+    end
   end
 
   def write_config(filename, clusters)
@@ -320,8 +352,8 @@ class HaproxyBuilder # {{{
     file.write "\n"
 
     write_config_mgnt(file, @bindaddr, @port) if @port != 0
-    write_config_http(clusters, file, @gateway_http_port) if @gateway_http_port > 0
-    write_config_https(clusters, file, @gateway_https_port) if @gateway_https_port > 0
+    write_config_http(file, clusters, @bindaddr, @gateway_http_port) if @gateway_http_port > 0
+    write_config_https(file, clusters, @bindaddr, @gateway_https_port) if @gateway_https_port > 0
 
     clusters.each do |app_id, cluster|
       # skip if the transport layer is anything else then TCP (e.g. UDP)
@@ -636,9 +668,17 @@ private
       accept_proxy = ((app['labels'] || {})[LB_ACCEPT_PROXY] || '').to_i
       proxy_protocol = ((app['labels'] || {})[LB_PROXY_PROTOCOL] || '').to_i
       vhost_default = (app['labels'] || {})[LB_VHOST_DEFAULT]
+      vhost_ssl_default = (app['labels'] || {})[LB_VHOST_SSL_DEFAULT]
 
       vhost_defs = ((app['labels'] || {})[LB_VHOST] || '').split(',')
       indexed_vhosts = vhost_defs.inject([]) do |result, vhost_def|
+        fields = vhost_def.split(':')
+        fields[1] = fields.size == 1 ? 0 : fields[1].to_i
+        result << fields
+      end
+
+      vhost_ssl_defs = ((app['labels'] || {})[LB_VHOST_SSL] || '').split(',')
+      indexed_vhosts_ssl = vhost_ssl_defs.inject([]) do |result, vhost_def|
         fields = vhost_def.split(':')
         fields[1] = fields.size == 1 ? 0 : fields[1].to_i
         result << fields
@@ -663,6 +703,10 @@ private
               indexed_vhosts.select {|vhost| vhost[1] == port_index}.
               map {|indexed_vhost| indexed_vhost[0]}
 
+          selected_vhosts_ssl =
+              indexed_vhosts_ssl.select {|vhost| vhost[1] == port_index}.
+              map {|indexed_vhost| indexed_vhost[0]}
+
           instances = []
           app['tasks'].each do |task|
             instances << AppInstance.new(task['id'],
@@ -676,6 +720,8 @@ private
               get_service_protocol(app, port_index),
               get_health_check(app, port_index),
               app['labels'],
+              selected_vhosts_ssl,
+              vhost_ssl_default,
               selected_vhosts,
               vhost_default != nil && vhost_default.to_i == port_index,
               accept_proxy,
