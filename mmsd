@@ -74,14 +74,14 @@ class AppCluster # {{{
                 :labels, :vhosts, :proxy_protocol, :instances
 
   def initialize(app_id, service_port, protocol, health_check, labels,
-                 proxy_protocol, vhosts, instances)
+                 vhosts, proxy_protocol, instances)
     @app_id = app_id
     @service_port = service_port
     @protocol = protocol
     @health_check = health_check
     @labels = labels
-    @proxy_protocol = proxy_protocol
     @vhosts = vhosts
+    @proxy_protocol = proxy_protocol
     @instances = instances
   end
 
@@ -202,17 +202,26 @@ class HaproxyBuilder # {{{
     end
   end
 
-  def write_config_http(file, port)
+  def write_config_http(clusters, file, port)
     # TODO
     file.write "frontend http\n"
     file.write "  bind #{@bindaddr}:#{port}\n"
     file.write "  mode tcp\n"
     file.write "  tcp-request inspect-delay 5s\n"
     file.write "  tcp-request content accept if { req_ssl_hello_type 1 }\n"
+
+    clusters.each do |app_id, cluster|
+      logger.debug "cliuster.vhosts: #{cluster.vhosts.inspect}"
+      cluster.vhosts.each do |vhost|
+        logger.debug "  vhost: #{vhost.inspect}"
+        file.write "  # vhost #{vhost}\n"
+      end
+    end
+
     file.write "\n"
   end
 
-  def write_config_https(file, port)
+  def write_config_https(clusters, file, port)
     return # TODO
 
     file.write "frontend https\n"
@@ -252,9 +261,9 @@ class HaproxyBuilder # {{{
     file.write "  timeout http-request 90000\n"
     file.write "\n"
 
-    if Helper.is_root_user?
-      write_config_http(file, 80)
-      write_config_https(file, 443)
+    if true # Helper.is_root_user?
+      write_config_http(clusters, file, 9080) # 80)
+      write_config_https(clusters, file, 1443) # 443)
     else
       logger.warn "Do not expose port 80 and port 443 HTTP gateway. No root user."
     end
