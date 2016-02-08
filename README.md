@@ -53,6 +53,9 @@ mmsd [options]
   --upstream-confd=PATH     Path to runtime state dir containing
                             a file for each Marathon application with a
                             simple list of hostname:port pairs per line.
+  --managed-ip=IPv4:IPv4    IP to manage via iptables NAT rules to point
+                            to this service. First IP is the service IP,
+                            whereas the second is the hosts IP.
   --log-level=LEVEL         one of debug, info, warn, error, fatal [info]
 
 Every command-line parameter can be also specified as environment variable,
