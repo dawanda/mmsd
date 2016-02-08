@@ -754,6 +754,37 @@ private
   end
 end
 # }}}
+class ServiceIP # {{{
+  attr_accessor :logger, :virtual_ip, :host_ip
+
+  def initialize(logger, virtual_ip, host_ip)
+    @logger = logger
+    @virtual_ip = virtual_ip
+    @host_ip = host_ip
+  end
+
+  def up
+    logger.debug "ServiceIP UP: Initialize virtual-ip #{virtual_ip}, host-ip #{host_ip}"
+
+    return unless @virtual_ip != '' && @host_ip != ''
+    comment = 'mmsd-service-ip'
+
+    ['PREROUTING', 'OUTPUT'].each do |chain|
+      `iptables -t nat -L #{chain} -n | grep -q #{virtual_ip}`
+      if $?.exitstatus != 0 then
+        logger.info "ServiceIP: Adding iptables rule to chain #{chain}"
+        `iptables -t nat -A #{chain} -d #{virtual_ip} -j DNAT --to #{host_ip} -m comment --comment '#{comment}'`
+      else
+        logger.info "ServiceIP: iptables rule for chain #{chain} already present."
+      end
+    end
+  end
+
+  def down
+    logger.debug "ServiceIP DOWN: keep virtual-ip #{virtual_ip}, host-ip #{host_ip}"
+   # do we want that?
+  end
+end # }}}
 class Mmsd # {{{
   attr_accessor :logger
 
@@ -774,6 +805,7 @@ class Mmsd # {{{
                   'gateway-http-port' => '80',
                   'gateway-https-port' => '443',
                   'upstream-confd' => '/var/run/mmsd/confd',
+                  'managed-ip' => '',
                   'log-level' => 'info'}
 
   def initialize(argv)
@@ -853,6 +885,13 @@ class Mmsd # {{{
       0
     end
 
+    if getopt('managed-ip') != '' then
+      managed_ip = getopt('managed-ip').split(':')
+      @service_ip = ServiceIP.new(logger, managed_ip[0], managed_ip[1])
+    else
+      @service_ip = ServiceIP.new(logger, '', '')
+    end
+
     handlers = []
     handlers << UpstreamConfDirHandler.new(getopt('upstream-confd'), logger)
     handlers << HaproxyBuilder.new(getopt('haproxy-bin'),
@@ -869,7 +908,11 @@ class Mmsd # {{{
                                       getopt('filter-groups').split(','),
                                       handlers,
                                       logger)
+    @service_ip.up
+
     sd.run
+
+    @service_ip.down
   end
 
   def getopt(name)
