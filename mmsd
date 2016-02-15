@@ -117,13 +117,14 @@ class AppCluster # {{{
 end
 # }}}
 class HaproxyBuilder # {{{
-  attr_accessor :binpath, :cfgfile, :pidfile, :bindaddr, :logger,
+  attr_accessor :binpath, :cfgfile, :cfgtail, :pidfile, :bindaddr, :logger,
                 :gateway_http_port, :gateway_https_port
 
-  def initialize(binpath, cfgfile, pidfile, bindaddr, port,
+  def initialize(binpath, cfgfile, cfgtail, pidfile, bindaddr, port,
                  gateway_http_port, gateway_https_port, logger)
     @binpath = binpath
     @cfgfile = cfgfile
+    @cfgtail = cfgtail
     @pidfile = pidfile
     @bindaddr = bindaddr
     @port = port
@@ -468,6 +469,7 @@ class HaproxyBuilder # {{{
       end
       file.write "\n"
     end
+    file.write @cfgtail
     file.close
   end
 end
@@ -515,6 +517,7 @@ class UpstreamConfDirHandler # {{{
     end
   rescue => bang
     logger.error "[confd] Failed to apply configuration. #{bang}"
+    logger.error bang.backtrace
   end
 
   def write_file(filename, app_id, cluster)
@@ -799,6 +802,7 @@ class Mmsd # {{{
                   'haproxy-bin' => '/usr/sbin/haproxy',
                   'haproxy-pidfile' => '/var/run/haproxy.pid',
                   'haproxy-cfg' => '/var/run/haproxy.cfg',
+                  'haproxy-cfgtail' => '',
                   'haproxy-bind' => '0.0.0.0',
                   'haproxy-port' => '8081',
                   'enable-gateway' => '',
@@ -892,10 +896,17 @@ class Mmsd # {{{
       @service_ip = ServiceIP.new(logger, '', '')
     end
 
+    config_tail = if getopt('haproxy-cfgtail') != '' then
+      File.read(getopt('haproxy-cfgtail'))
+    else
+      ''
+    end
+
     handlers = []
     handlers << UpstreamConfDirHandler.new(getopt('upstream-confd'), logger)
     handlers << HaproxyBuilder.new(getopt('haproxy-bin'),
                                    getopt('haproxy-cfg'),
+                                   config_tail,
                                    getopt('haproxy-pidfile'),
                                    getopt('haproxy-bind'),
                                    getopt('haproxy-port').to_i,

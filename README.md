@@ -41,6 +41,7 @@ mmsd [options]
   --haproxy-bin=PATH        Path to haproxy binary [/usr/bin/haproxy]
   --haproxy-pidfile=PATH    Path to haproxy PID file [/var/run/haproxy.pid]
   --haproxy-cfg=PATH        Path to haproxy.cfg [/var/run/haproxy.cfg]
+  --haproxy-tail=PATH       Path to haproxy config tail [].
   --haproxy-bind=IP         Default IP bind [0.0.0.0]
   --haproxy-port=PORT       haproxy TCP port to the management interface.
   --enable-gateway          Enables HTTP(S) gateway. Disabled by default.
