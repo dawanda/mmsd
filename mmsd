@@ -488,7 +488,7 @@ class UpstreamConfDirHandler # {{{
 
     clusters.each do |app_id, cluster|
       # kill the first / and replace any other occurence with a dot
-      app_id = Helper.prettify_app_id(app_id)
+      app_id = Helper.prettify_app_id(app_id, cluster.service_port)
 
       cfgfile = "#{confd_path}/#{app_id}.instances"
       tmpfile = "#{cfgfile}.tmp"
