@@ -403,11 +403,16 @@ class HaproxyBuilder # {{{
 
       case app_protocol
       when 'http'
+        uri = cluster.health_check.http_path || '/'
+
+        # TODO: use label "#{LB_VHOST}-health-check" if available
+        vhost = 'health-check'
+
         file.write "  mode http\n"
         file.write "  option forwardfor\n"
         file.write "  option abortonclose\n"
         file.write "  option redispatch\n"
-        file.write "  option httpchk GET #{cluster.health_check.http_path || '/'}\n"
+        file.write "  option httpchk GET #{uri} HTTP/1.1\\r\\nHost:\\ #{vhost}\n"
         file.write "  retries 3\n"
         # TODO support custom haproxy option fields
       when 'smtp'
