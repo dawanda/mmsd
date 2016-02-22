@@ -436,7 +436,7 @@ class HaproxyBuilder # {{{
         file.write "  tcp-check expect string role:slave\n"
         file.write "  tcp-check send QUIT\\r\\n\n"
         file.write "  tcp-check expect string +OK\n"
-      when 'redis', 'redis-master'
+      when 'redis-master', 'redis', 'redis-server'
         file.write "  mode tcp\n"
         file.write "  option tcp-check\n"
         file.write "  tcp-check connect\n"
