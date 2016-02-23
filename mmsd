@@ -779,6 +779,9 @@ class ServiceIP # {{{
     comment = 'mmsd-service-ip'
 
     ['PREROUTING', 'OUTPUT'].each do |chain|
+      # ensure any left-off traces are gone first
+      `for n in $(iptables -t nat -L #{chain}-n | awk '$5 == "#{virtual_ip}" {print NR - 2}'); do iptables -t nat -D #{chain} $n; done`
+
       `iptables -t nat -L #{chain} -n | grep -q #{virtual_ip}`
       if $?.exitstatus != 0 then
         logger.info "ServiceIP: Adding iptables rule to chain #{chain}"
