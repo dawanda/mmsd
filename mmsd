@@ -769,6 +769,7 @@ class ServiceIP # {{{
     @logger = logger
     @virtual_ip = virtual_ip
     @host_ip = host_ip
+    @host_ip ||= `ip route | grep -w src | grep -v -w linkdown | awk '{print $NF}' | tail -n1`.strip
   end
 
   def up
