@@ -768,8 +768,12 @@ class ServiceIP # {{{
   def initialize(logger, virtual_ip, host_ip)
     @logger = logger
     @virtual_ip = virtual_ip
-    @host_ip = host_ip
-    @host_ip ||= `ip route | grep -w src | grep -v -w linkdown | awk '{print $NF}' | tail -n1`.strip
+
+    @host_ip = if @host_ip.nil? || @host_ip.empty? then
+      `ip route | grep -w src | grep -v -w linkdown | awk '{print $NF}' | tail -n1`.strip
+    else
+      host_ip
+    end
   end
 
   def up
