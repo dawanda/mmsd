@@ -2,7 +2,7 @@ package main
 
 /* TODO:
 
-1. [ ] serve HTTP /v1/instances/:app_id to retrieve ip:port pairs for given app
+1. [x] serve HTTP /v1/instances/:app_id to retrieve ip:port pairs for given app
 2. [ ] implement upstream-conf.d file management
 3. [ ] implement UDP proxy (one-way/two-way, fanout & roundrobin)
 4. [ ] implement TCP proxy (with pluggable impls: haproxy, lvs, ...)
@@ -40,12 +40,6 @@ type MmsdService struct {
 	HaproxyPort      uint
 	ServiceBind      net.IP
 	ServicePort      uint
-}
-
-type HealthStatusChangedEvent struct {
-	AppId  string
-	TaskId string
-	Alive  bool
 }
 
 func (mmsd *MmsdService) v1_instances(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +80,12 @@ func (mmsd *MmsdService) v1_instances(w http.ResponseWriter, r *http.Request) {
 	for _, task := range app.Tasks {
 		fmt.Fprintf(w, "%v:%v\n", task.Host, task.Ports[portIndex])
 	}
+}
+
+type HealthStatusChangedEvent struct {
+	AppId  string
+	TaskId string
+	Alive  bool
 }
 
 func (mmsd *MmsdService) SetupSSE() {
