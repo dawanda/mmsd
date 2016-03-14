@@ -19,12 +19,18 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/christianparpart/serviced/marathon"
 	"github.com/gorilla/mux"
 	flag "github.com/ogier/pflag"
 )
+
+type MmsdHandler interface {
+	Apply(apps []*marathon.App, force bool) error
+}
 
 type MmsdService struct {
 	MarathonScheme   string
@@ -40,6 +46,32 @@ type MmsdService struct {
 	HaproxyPort      uint
 	ServiceBind      net.IP
 	ServicePort      uint
+	Handlers         []MmsdHandler
+}
+
+func (mmsd *MmsdService) v1_apps(w http.ResponseWriter, r *http.Request) {
+	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
+
+	if err != nil {
+		log.Printf("NewService error. %v\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	apps, err := m.GetApps()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("GetApps error. %v\n", err)
+		return
+	}
+
+	var appList []string
+	for _, app := range apps {
+		appList = append(appList, app.Id)
+	}
+	sort.Strings(appList)
+
+	fmt.Fprintf(w, "%s\n", strings.Join(appList, "\n"))
 }
 
 func (mmsd *MmsdService) v1_instances(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +88,7 @@ func (mmsd *MmsdService) v1_instances(w http.ResponseWriter, r *http.Request) {
 
 	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
 	if err != nil {
+		log.Printf("NewService error. %v\n", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -122,6 +155,41 @@ func (mmsd *MmsdService) SetupSSE() {
 	go sse.RunForever()
 }
 
+func (mmsd *MmsdService) ResetFromTasks() error {
+	return mmsd.MaybeResetFromTasks(false)
+}
+
+func (mmsd *MmsdService) ForcedResetFromTasks() error {
+	return mmsd.MaybeResetFromTasks(true)
+}
+
+func (mmsd *MmsdService) MaybeResetFromTasks(force bool) error {
+	log.Printf("MaybeResetFromTasks(%v)\n", force)
+	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
+	if err != nil {
+		return err
+	}
+
+	apps, err := m.GetApps()
+	if err != nil {
+		return err
+	}
+
+	for _, handler := range mmsd.Handlers {
+		log.Printf("Calling handler\n")
+		err = handler.Apply(apps, force)
+		if err != nil {
+			log.Printf("Failed to apply changes to handler. %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+func PrettifyAppId(name string) string {
+	return name
+}
+
 func (mmsd *MmsdService) Run() {
 	flag.IPVar(&mmsd.MarathonIP, "marathon-ip", mmsd.MarathonIP, "Marathon endpoint TCP IP address")
 	flag.UintVar(&mmsd.MarathonPort, "marathon-port", mmsd.MarathonPort, "Marathon endpoint TCP port number")
@@ -138,12 +206,23 @@ func (mmsd *MmsdService) Run() {
 
 	flag.Parse()
 
+	// handlers
+	mmsd.Handlers = append(mmsd.Handlers, &UpstreamFilesBuilder{
+		BasePath: mmsd.RunStateDir + "/conf.d"})
+
+	err := mmsd.ForcedResetFromTasks()
+	if err != nil {
+		log.Printf("Could not force task state reset. %v\n", err)
+	}
+
+	// SSE
 	mmsd.SetupSSE()
 
 	// HTTP service
 	router := mux.NewRouter()
 	v1 := router.PathPrefix("/v1").Subrouter()
 
+	v1.HandleFunc("/apps", mmsd.v1_apps).Methods("GET")
 	v1.HandleFunc("/instances{name:/.*}", mmsd.v1_instances).Methods("GET")
 
 	serviceAddr := fmt.Sprintf("%v:%v", mmsd.ServiceBind, mmsd.ServicePort)

@@ -128,3 +128,11 @@ on the application gateway's SSL port (usually 443)
 - `redis-master` same as `redis` but only masters will be healthy
 - `redis-slave` same as `redis` but only slaves will be healthy
 - ... any other interesting text protocols we can map into haproxy?
+
+### Service Discovery HTTP endpoint
+
+- `/v1/apps` retrieves the list of all apps in Marathon, one app name by line
+- `/v1/instances/NAME` retrieves list of instances by hostname:port tuple in
+  each line for given application path, for example:
+  `/v1/instances/production/sqltap1`
+
