@@ -1,0 +1,23 @@
+{
+	"ImportPath": "github.com/dawanda/mmsd",
+	"GoVersion": "go1.6",
+	"Deps": [
+		{
+			"ImportPath": "github.com/christianparpart/serviced/marathon",
+			"Rev": "0ad50942a4dc4aaad0f6dcb261ddb4ea9de7031e"
+		},
+		{
+			"ImportPath": "github.com/gorilla/context",
+			"Rev": "1ea25387ff6f684839d82767c1733ff4d4d15d0a"
+		},
+		{
+			"ImportPath": "github.com/gorilla/mux",
+			"Rev": "c9e326e2bdec29039a3761c07bece13133863e1e"
+		},
+		{
+			"ImportPath": "github.com/ogier/pflag",
+			"Comment": "v0.0.1-7-g45c278a",
+			"Rev": "45c278ab3607870051a2ea9040bb85fcb8557481"
+		}
+	]
+}
