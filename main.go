@@ -89,8 +89,10 @@ func (mmsd *MmsdService) v1_instances(w http.ResponseWriter, r *http.Request) {
 }
 
 func (mmsd *MmsdService) SetupSSE() {
-	var baseUrl string = "http://rack5-gateway:8080"
-	var sse *EventSource = NewEventSource(fmt.Sprintf("%s/v2/events", baseUrl))
+	var url string = fmt.Sprintf("http://%v:%v/v2/events",
+		mmsd.MarathonIP, mmsd.MarathonPort)
+
+	var sse *EventSource = NewEventSource(url)
 
 	sse.OnOpen = func(event, data string) {
 		log.Printf("OnOpen event '%v': %+v\n", event, data)
