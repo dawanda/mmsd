@@ -49,10 +49,10 @@ type EventSource struct {
 	LastEventID    string
 }
 
-func NewEventSource(url string) *EventSource {
+func NewEventSource(url string, reconnectDelay time.Duration) *EventSource {
 	var sse = &EventSource{Url: url,
 		ReadyState:     CONNECTING,
-		ReconnectDelay: time.Second * 1,
+		ReconnectDelay: reconnectDelay,
 		Handlers:       make(map[string]EventHandler)}
 
 	return sse
@@ -94,8 +94,11 @@ func (sse *EventSource) Run() {
 	req.Header.Add("Cache-Control", "no-cache")
 
 	resp, err := client.Do(req)
-	if err != nil && sse.OnError != nil {
-		sse.OnError("error", err.Error())
+	if err != nil {
+		if sse.OnError != nil {
+			sse.OnError("error", err.Error())
+		}
+		return
 	}
 
 	defer resp.Body.Close()
@@ -163,10 +166,14 @@ func (sse *EventSource) RunForever() {
 
 	for sse.ReadyState != CLOSED {
 		sse.ReadyState = CONNECTING
+
 		if sse.OnError != nil {
 			sse.OnError("error", "Reconnecting")
 		}
-		time.Sleep(sse.ReconnectDelay)
+
+		if sse.ReconnectDelay != 0 {
+			time.Sleep(sse.ReconnectDelay)
+		}
 
 		sse.Run()
 	}
