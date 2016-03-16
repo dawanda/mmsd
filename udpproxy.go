@@ -14,33 +14,49 @@ const (
 	Multicast  Scheduler = 2
 )
 
+func (s Scheduler) String() string {
+	switch s {
+	case RoundRobin:
+		return "RoundRobin"
+	case Multicast:
+		return "Multicast"
+	default:
+		return fmt.Sprintf("%d", s)
+	}
+}
+
 // ----------------------------------------------------------------------------
-type Backend struct {
+type UdpBackend struct {
 	Name             string
 	Addr             *net.UDPAddr
 	MessageSentCount uint
 	MessageRecvCount uint
 	Responder        chan []byte
+	Touched          bool
 	// Write chan string
 }
 
-func NewBackend(name string, addr string, scheduler Scheduler) (*Backend, error) {
+func NewUdpBackend(name string, addr string, scheduler Scheduler) (*UdpBackend, error) {
 	beAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, err
 	}
 
-	be := &Backend{Name: name, Addr: beAddr}
+	be := &UdpBackend{Name: name, Addr: beAddr, Touched: false}
 
 	return be, err
 }
 
-func (be *Backend) CreateConnection() (*net.UDPConn, error) {
+func (be *UdpBackend) Touch() {
+	be.Touched = true
+}
+
+func (be *UdpBackend) CreateConnection() (*net.UDPConn, error) {
 	conn, err := net.DialUDP("udp", nil, be.Addr)
 	return conn, err
 }
 
-func (be *Backend) Send(msg []byte, sender *net.UDPAddr, fe *Frontend) error {
+func (be *UdpBackend) Send(msg []byte, sender *net.UDPAddr, fe *UdpFrontend) error {
 	be.MessageSentCount++
 
 	// create BE connection
@@ -91,29 +107,29 @@ func (be *Backend) Send(msg []byte, sender *net.UDPAddr, fe *Frontend) error {
 	return nil
 }
 
-func (be Backend) String() string {
+func (be UdpBackend) String() string {
 	return fmt.Sprintf("%v: %v", be.Name, be.Addr)
 }
 
 // ----------------------------------------------------------------------------
 type Session struct {
 	LastActive  time.Time
-	Backend     *Backend
+	Backend     *UdpBackend
 	RequestBuf  string
 	ResponseBuf string
 }
 
 // ----------------------------------------------------------------------------
-type Frontend struct {
+type UdpFrontend struct {
 	Name            string
 	Conn            *net.UDPConn
 	Scheduler       Scheduler
-	Backends        []*Backend
+	Backends        []*UdpBackend
 	ResponseTimeout time.Duration
 	//Sessions map[net.Addr]Session
 }
 
-func NewFrontend(name, addr string, sched Scheduler) (*Frontend, error) {
+func NewUdpFrontend(name, addr string, sched Scheduler) (*UdpFrontend, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, err
@@ -124,29 +140,63 @@ func NewFrontend(name, addr string, sched Scheduler) (*Frontend, error) {
 		return nil, err
 	}
 
-	return &Frontend{Name: name, Conn: conn, Scheduler: sched, ResponseTimeout: time.Second * 1}, nil
+	fe := &UdpFrontend{
+		Name:            name,
+		Conn:            conn,
+		Scheduler:       sched,
+		ResponseTimeout: time.Second * 1,
+	}
+
+	return fe, nil
 }
 
-func (fe *Frontend) Close() {
+func (fe *UdpFrontend) Close() {
 	fe.Conn.Close()
 }
 
-func (fe *Frontend) AddBackend(name, addr string) (*Backend, error) {
-	be, err := NewBackend(name, addr, fe.Scheduler)
+func (fe *UdpFrontend) ClearTouch() {
+	for _, be := range fe.Backends {
+		be.Touched = false
+	}
+}
+
+func (fe *UdpFrontend) RemoveUntouched() {
+	var touched []*UdpBackend
+
+	for _, be := range fe.Backends {
+		if be.Touched {
+			touched = append(touched, be)
+		} else {
+			log.Printf("Removing UDP backend %v %v.\n", be.Addr, be.Name)
+		}
+	}
+
+	fe.Backends = touched
+}
+
+func (fe *UdpFrontend) AddBackend(name, addr string) (*UdpBackend, error) {
+	for _, be := range fe.Backends {
+		if be.Name == name {
+			return be, nil
+		}
+	}
+
+	be, err := NewUdpBackend(name, addr, fe.Scheduler)
 	if err != nil {
 		return nil, err
 	}
 
+	log.Printf("Adding UDP backend %v %v.\n", be.Addr, name)
 	fe.Backends = append(fe.Backends, be)
 	return be, nil
 }
 
-func (fe *Frontend) Serve() {
+func (fe *UdpFrontend) Serve() {
 	for {
 		msg := make([]byte, 16*1024)
 		n, saddr, err := fe.Conn.ReadFromUDP(msg)
 		if err != nil {
-			log.Printf("[%v] [%v] Failed to read. %v\n", fe.Name, saddr, fe.Conn.LocalAddr())
+			log.Printf("[%v] [%v] Failed to read. %v %v\n", fe.Name, saddr, err)
 			return
 		}
 
@@ -163,13 +213,13 @@ func (fe *Frontend) Serve() {
 	}
 }
 
-func (fe *Frontend) Multicast(msg []byte, sender *net.UDPAddr) {
+func (fe *UdpFrontend) Multicast(msg []byte, sender *net.UDPAddr) {
 	for _, be := range fe.Backends {
 		go be.Send(msg, sender, fe)
 	}
 }
 
-func (fe *Frontend) RoundRobin(msg []byte, sender *net.UDPAddr) {
+func (fe *UdpFrontend) RoundRobin(msg []byte, sender *net.UDPAddr) {
 	be := fe.Backends[0]
 	err := be.Send(msg, sender, fe)
 
@@ -178,7 +228,7 @@ func (fe *Frontend) RoundRobin(msg []byte, sender *net.UDPAddr) {
 	}
 }
 
-func (fe *Frontend) String() string {
+func (fe *UdpFrontend) String() string {
 	var sched string
 	switch fe.Scheduler {
 	case RoundRobin:
@@ -189,24 +239,24 @@ func (fe *Frontend) String() string {
 		sched = "unknown"
 	}
 
-	return fmt.Sprintf("Frontend{%v, %v, %v, %v}",
+	return fmt.Sprintf("UdpFrontend{%v, %v, %v, %v}",
 		fe.Name, fe.Conn.LocalAddr(), sched, fe.Backends)
 }
 
 // ----------------------------------------------------------------------------
 type UdpProxy struct {
 	// listen on downstreams and pass them upstream
-	Frontends   map[string]*Frontend
+	Frontends   map[string]*UdpFrontend
 	quitChannel chan bool
 }
 
 func NewUdpProxy() *UdpProxy {
 	return &UdpProxy{
-		Frontends: make(map[string]*Frontend),
+		Frontends: make(map[string]*UdpFrontend),
 	}
 }
 
-func (proxy *UdpProxy) AddOrReplaceFrontend(name, addr string, sched Scheduler) (*Frontend, error) {
+func (proxy *UdpProxy) AddOrReplaceFrontend(name, addr string, sched Scheduler) (*UdpFrontend, error) {
 	if fe, found := proxy.Frontends[addr]; found == true {
 		// first close and wipe the frontend, so we can recreate it
 		fe.Close()
@@ -216,8 +266,8 @@ func (proxy *UdpProxy) AddOrReplaceFrontend(name, addr string, sched Scheduler) 
 	return proxy.AddFrontend(name, addr, sched)
 }
 
-func (proxy *UdpProxy) AddFrontend(name, addr string, sched Scheduler) (*Frontend, error) {
-	frontend, err := NewFrontend(name, addr, sched)
+func (proxy *UdpProxy) AddFrontend(name, addr string, sched Scheduler) (*UdpFrontend, error) {
+	frontend, err := NewUdpFrontend(name, addr, sched)
 	if err != nil {
 		return nil, err
 	}

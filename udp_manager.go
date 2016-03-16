@@ -10,52 +10,79 @@ import (
 type UdpManager struct {
 	Verbose  bool
 	BindAddr net.IP
-	Proxy    *UdpProxy
+	Servers  map[string]*UdpFrontend
 }
 
-func NewUdpManager(bindAddr net.IP) *UdpManager {
+func NewUdpManager(bindAddr net.IP, verbose bool) *UdpManager {
 	return &UdpManager{
-		Verbose:  true,
+		Verbose:  verbose,
 		BindAddr: bindAddr,
-		Proxy:    NewUdpProxy(),
+		Servers:  make(map[string]*UdpFrontend),
 	}
 }
 
 func (manager *UdpManager) Apply(apps []*marathon.App, force bool) error {
 	for _, app := range apps {
-		for portIndex := range app.Ports {
-			if GetTransportProtocol(app, portIndex) == "udp" {
-				if app.Container.Docker != nil {
-					// create frontend
-					portMapping := app.Container.Docker.PortMappings[portIndex]
-					name := PrettifyAppId(app.Id, portIndex, portMapping.ServicePort)
-					addr := fmt.Sprintf("%v:%v", manager.BindAddr, portMapping.ServicePort)
-					sched := Multicast
-					log.Printf("Create UDP frontend %v: %v\n", name, addr)
-					fe, err := manager.Proxy.AddOrReplaceFrontend(name, addr, sched)
-					if err != nil {
-						log.Printf("Error spawning UDP frontend. %v\n", err)
-					} else {
-						// add backends
-						for _, task := range app.Tasks {
-							name := fmt.Sprintf("%v-%v", task.Host, task.Id)
-							addr := fmt.Sprintf("%v:%v", task.Host, task.Ports[portIndex])
-							log.Printf("Adding UDP backend %v (%v)\n", addr, task.Id)
-							fe.AddBackend(name, addr)
-						}
-					}
-
-					// serve in background
-					go fe.Serve()
-				}
-			}
+		err := manager.ApplyApp(app)
+		if err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-func (manager *UdpManager) Update(app *marathon.App, task *marathon.Task) error {
-	// TODO: only apply changes to given app/task
+func (manager *UdpManager) GetFrontend(app *marathon.App, portIndex int, replace bool) (*UdpFrontend, error) {
+	servicePort := app.Container.Docker.PortMappings[portIndex].ServicePort
+	name := PrettifyAppId(app.Id, portIndex, servicePort)
+
+	server, ok := manager.Servers[name]
+	if ok {
+		return server, nil
+	}
+
+	addr := fmt.Sprintf("%v:%v", manager.BindAddr, servicePort)
+	sched := Multicast // TODO: configurable
+
+	log.Printf("Spawn UDP frontend %v %v %v\n", addr, sched, name)
+	fe, err := NewUdpFrontend(name, addr, sched)
+	if err != nil {
+		return nil, err
+	}
+
+	manager.Servers[name] = fe
+	return fe, nil
+}
+
+func (manager *UdpManager) ApplyApp(app *marathon.App) error {
+	for portIndex := range app.Ports {
+		if GetTransportProtocol(app, portIndex) == "udp" {
+			fe, err := manager.GetFrontend(app, portIndex, true)
+			if err != nil {
+				log.Printf("Error spawning UDP frontend. %v\n", err)
+			} else {
+				// add backends
+				fe.ClearTouch()
+				for _, task := range app.Tasks {
+					name := fmt.Sprintf("%v-%v", task.Host, task.Id)
+					addr := fmt.Sprintf("%v:%v", task.Host, task.Ports[portIndex])
+					be, err := fe.AddBackend(name, addr)
+					if err != nil {
+						log.Printf("Failed to add backend %v %v. %v\n", name, addr, err)
+					} else {
+						be.Touch()
+					}
+				}
+				fe.RemoveUntouched()
+			}
+
+			// serve in background
+			go fe.Serve()
+		}
+	}
 	return nil
+}
+
+func (manager *UdpManager) Update(app *marathon.App, task *marathon.Task) error {
+	return manager.ApplyApp(app)
 }

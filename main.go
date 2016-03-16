@@ -3,8 +3,8 @@ package main
 /* TODO:
 
 1. [x] serve HTTP /v1/instances/:app_id to retrieve ip:port pairs for given app
+3. [x] implement UDP proxy (one-way/two-way, fanout (& roundrobin))
 2. [x] implement upstream-conf.d file management
-3. [ ] implement UDP proxy (one-way/two-way, fanout & roundrobin)
 4. [ ] implement TCP proxy (with pluggable impls: haproxy, lvs, ...)
 5. [ ] implement HTTP(S) gateway support
 6. [ ] tcp-proxy: add `accept-proxy` support
@@ -54,6 +54,7 @@ type MmsdService struct {
 	HaproxyPort      uint
 	ServiceBind      net.IP
 	ServicePort      uint
+	Verbose          bool
 	Handlers         []MmsdHandler
 }
 
@@ -172,7 +173,6 @@ func (mmsd *MmsdService) Update(appId string, taskId string, alive bool) {
 
 	for _, handler := range mmsd.Handlers {
 		handler.Update(app, task)
-		return
 	}
 }
 
@@ -201,6 +201,7 @@ const AppVersion = "1.0.0"
 const AppLicense = "MIT"
 
 func (mmsd *MmsdService) Run() {
+	flag.BoolVarP(&mmsd.Verbose, "verbose", "v", mmsd.Verbose, "Set verbosity level")
 	flag.IPVar(&mmsd.MarathonIP, "marathon-ip", mmsd.MarathonIP, "Marathon endpoint TCP IP address")
 	flag.UintVar(&mmsd.MarathonPort, "marathon-port", mmsd.MarathonPort, "Marathon endpoint TCP port number")
 	flag.DurationVar(&mmsd.ReconnectDelay, "reconnect-delay", mmsd.ReconnectDelay, "Marathon reconnect delay")
@@ -242,10 +243,12 @@ func (mmsd *MmsdService) SetupHandlers() {
 	// spawn upstream file handler
 	mmsd.Handlers = append(mmsd.Handlers, &UpstreamFileManager{
 		BasePath: mmsd.RunStateDir + "/confd",
-		Verbose:  false,
+		Verbose:  mmsd.Verbose,
 	})
 
-	mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(mmsd.ServiceBind))
+	mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(
+		mmsd.ServiceBind,
+		mmsd.Verbose))
 
 	// TODO: spawn TCP proxy handler (haproxy)
 
@@ -271,6 +274,7 @@ func main() {
 		HaproxyPort:      8081,
 		ServiceBind:      net.ParseIP("0.0.0.0"),
 		ServicePort:      8082,
+		Verbose:          false,
 	}
 
 	mmsd.Run()
