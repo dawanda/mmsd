@@ -47,10 +47,12 @@ type MmsdService struct {
 	MarathonPort     uint
 	ReconnectDelay   time.Duration
 	RunStateDir      string
+	FilterGroups     string
 	GatewayEnabled   bool
 	GatewayPortHTTP  uint
 	GatewayPortHTTPS uint
 	ManagedIP        net.IP
+	HaproxyBin       string
 	HaproxyTailCfg   string
 	HaproxyPort      uint
 	ServiceBind      net.IP
@@ -207,10 +209,12 @@ func (mmsd *MmsdService) Run() {
 	flag.UintVar(&mmsd.MarathonPort, "marathon-port", mmsd.MarathonPort, "Marathon endpoint TCP port number")
 	flag.DurationVar(&mmsd.ReconnectDelay, "reconnect-delay", mmsd.ReconnectDelay, "Marathon reconnect delay")
 	flag.StringVar(&mmsd.RunStateDir, "run-state-dir", mmsd.RunStateDir, "Path to directory to keep run-state")
+	flag.StringVar(&mmsd.FilterGroups, "filter-groups", mmsd.FilterGroups, "Application group filter")
 	flag.IPVar(&mmsd.ManagedIP, "managed-ip", mmsd.ManagedIP, "IP-address to manage for mmsd")
 	flag.BoolVar(&mmsd.GatewayEnabled, "gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-http-port", mmsd.GatewayPortHTTP, "gateway HTTP port")
 	flag.UintVar(&mmsd.GatewayPortHTTPS, "gateway-https-port", mmsd.GatewayPortHTTPS, "gateway HTTP port")
+	flag.StringVar(&mmsd.HaproxyBin, "haproxy-bin", mmsd.HaproxyBin, "path to haproxy binary")
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceBind, "haproxy-bind", mmsd.ServiceBind, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
@@ -272,9 +276,11 @@ func main() {
 		MarathonPort:     8080,
 		ReconnectDelay:   time.Second * 4,
 		RunStateDir:      "/var/run/mmsd",
+		FilterGroups:     "*",
 		GatewayEnabled:   false,
 		GatewayPortHTTP:  80,
 		GatewayPortHTTPS: 443,
+		HaproxyBin:       "/usr/bin/haproxy",
 		HaproxyTailCfg:   "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:      8081,
 		ServiceBind:      net.ParseIP("0.0.0.0"),
