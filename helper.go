@@ -11,12 +11,11 @@ import (
 	"github.com/christianparpart/serviced/marathon"
 )
 
-func PrettifyAppId(name string, portIndex int, servicePort uint) string {
-	app_id := name[1:]
-	app_id = strings.Replace(app_id, "/", ".", -1)
+func PrettifyAppId(name string, portIndex int, servicePort uint) (app_id string) {
+	app_id = strings.Replace(name[1:], "/", ".", -1)
 	app_id = fmt.Sprintf("%v-%v-%v", app_id, portIndex, servicePort)
 
-	return app_id
+	return
 }
 
 // http://stackoverflow.com/a/30038571/386670
@@ -72,43 +71,42 @@ func FileIsIdentical(file1, file2 string) bool {
 	}
 }
 
-func Contains(slice []string, item string) bool {
+func Contains(slice []string, item string) (ok bool) {
 	set := make(map[string]struct{}, len(slice))
 	for _, s := range slice {
 		set[s] = struct{}{}
 	}
 
-	_, ok := set[item]
-	return ok
+	_, ok = set[item]
+	return
 }
 
 // Finds all missing items that are found in slice2 but not in slice1.
-func FindMissing(slice1, slice2 []string) []string {
-	var missing []string
-
+func FindMissing(slice1, slice2 []string) (missing []string) {
 	for _, item := range slice1 {
 		if !Contains(slice2, item) {
 			missing = append(missing, item)
 		}
 	}
 
-	return missing
+	return
 }
 
-func GetApplicationProtocol(app *marathon.App, portIndex int) string {
-	if proto := app.Labels["proto"]; len(proto) != 0 {
-		return strings.ToLower(proto)
+func GetApplicationProtocol(app *marathon.App, portIndex int) (proto string) {
+	if proto = strings.ToLower(app.Labels["proto"]); len(proto) != 0 {
+		return
 	}
 
-	if proto := GetHealthCheckProtocol(app, portIndex); len(proto) != 0 {
-		return proto
+	if proto = GetHealthCheckProtocol(app, portIndex); len(proto) != 0 {
+		return
 	}
 
-	if proto := GetTransportProtocol(app, portIndex); len(proto) != 0 {
-		return proto
+	if proto = GetTransportProtocol(app, portIndex); len(proto) != 0 {
+		return
 	}
 
-	return "tcp"
+	proto = "tcp"
+	return
 }
 
 func GetTransportProtocol(app *marathon.App, portIndex int) string {
