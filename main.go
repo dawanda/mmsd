@@ -14,6 +14,7 @@ XXX Changes:
 
 * `--marathon-host` is now named `--marathon-ip` and only accepts IP addresses
 * `--reconnect-delay` added
+* `--haproxy-cfg` removed
 * also exposes service discovery API via HTTP endpoint
 
 */
@@ -24,6 +25,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,8 +51,7 @@ type MmsdService struct {
 	GatewayPortHTTP  uint
 	GatewayPortHTTPS uint
 	ManagedIP        net.IP
-	HaproxyCfg       string
-	HaproxyCfgTail   string
+	HaproxyTailCfg   string
 	HaproxyPort      uint
 	ServiceBind      net.IP
 	ServicePort      uint
@@ -131,10 +132,10 @@ func (mmsd *MmsdService) SetupEventBusListener() {
 	var sse *EventSource = NewEventSource(url, mmsd.ReconnectDelay)
 
 	sse.OnOpen = func(event, data string) {
-		log.Printf("OnOpen event '%v': %+v\n", event, data)
+		log.Printf("Listening for events from Marathon on %v\n", url)
 	}
 	sse.OnError = func(event, data string) {
-		log.Printf("OnError: '%v': %+v\n", event, data)
+		log.Printf("Marathon Event Stream Error. %v. %v\n", event, data)
 	}
 
 	sse.AddEventListener("status_update_event", func(data string) {
@@ -210,8 +211,7 @@ func (mmsd *MmsdService) Run() {
 	flag.BoolVar(&mmsd.GatewayEnabled, "gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-http-port", mmsd.GatewayPortHTTP, "gateway HTTP port")
 	flag.UintVar(&mmsd.GatewayPortHTTPS, "gateway-https-port", mmsd.GatewayPortHTTPS, "gateway HTTP port")
-	flag.StringVar(&mmsd.HaproxyCfg, "haproxy-cfg", mmsd.HaproxyCfg, "path to haproxy config file")
-	flag.StringVar(&mmsd.HaproxyCfgTail, "haproxy-cfgtail", mmsd.HaproxyCfgTail, "path to haproxy tail config file")
+	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceBind, "haproxy-bind", mmsd.ServiceBind, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
 	flag.Usage = func() {
@@ -234,23 +234,29 @@ func (mmsd *MmsdService) Run() {
 	v1.HandleFunc("/instances{name:/.*}", mmsd.v1_instances).Methods("GET")
 
 	serviceAddr := fmt.Sprintf("%v:%v", mmsd.ServiceBind, mmsd.ServicePort)
-	log.Printf("Service listening on http://%v\n", serviceAddr)
+	log.Printf("Exposing service API on http://%v\n", serviceAddr)
 
 	http.ListenAndServe(serviceAddr, router)
 }
 
 func (mmsd *MmsdService) SetupHandlers() {
-	// spawn upstream file handler
-	mmsd.Handlers = append(mmsd.Handlers, &UpstreamFileManager{
-		BasePath: mmsd.RunStateDir + "/confd",
-		Verbose:  mmsd.Verbose,
-	})
-
-	mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(
-		mmsd.ServiceBind,
-		mmsd.Verbose))
-
-	// TODO: spawn TCP proxy handler (haproxy)
+	mmsd.Handlers = []MmsdHandler{
+		NewUdpManager(
+			mmsd.ServiceBind,
+			mmsd.Verbose,
+		),
+		&HaproxyMgr{
+			ConfigTailPath: mmsd.HaproxyTailCfg,
+			ConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg"),
+			PidFile:        filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
+			ManagementAddr: mmsd.ServiceBind,
+			ManagementPort: mmsd.HaproxyPort,
+		},
+		&UpstreamFileManager{
+			BasePath: mmsd.RunStateDir + "/confd",
+			Verbose:  mmsd.Verbose,
+		},
+	}
 
 	// trigger initial run
 	err := mmsd.MaybeResetFromTasks(true)
@@ -269,8 +275,7 @@ func main() {
 		GatewayEnabled:   false,
 		GatewayPortHTTP:  80,
 		GatewayPortHTTPS: 443,
-		HaproxyCfg:       "/var/run/mmsd/haproxy.cfg",
-		HaproxyCfgTail:   "/etc/mmsd/haproxy-tail.cfg",
+		HaproxyTailCfg:   "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:      8081,
 		ServiceBind:      net.ParseIP("0.0.0.0"),
 		ServicePort:      8082,

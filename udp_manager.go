@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/christianparpart/serviced/marathon"
+	"github.com/dawanda/mmsd/udpproxy"
 	"log"
 	"net"
 )
@@ -10,14 +11,14 @@ import (
 type UdpManager struct {
 	Verbose  bool
 	BindAddr net.IP
-	Servers  map[string]*UdpFrontend
+	Servers  map[string]*udpproxy.Frontend
 }
 
 func NewUdpManager(bindAddr net.IP, verbose bool) *UdpManager {
 	return &UdpManager{
 		Verbose:  verbose,
 		BindAddr: bindAddr,
-		Servers:  make(map[string]*UdpFrontend),
+		Servers:  make(map[string]*udpproxy.Frontend),
 	}
 }
 
@@ -32,7 +33,7 @@ func (manager *UdpManager) Apply(apps []*marathon.App, force bool) error {
 	return nil
 }
 
-func (manager *UdpManager) GetFrontend(app *marathon.App, portIndex int, replace bool) (*UdpFrontend, error) {
+func (manager *UdpManager) GetFrontend(app *marathon.App, portIndex int, replace bool) (*udpproxy.Frontend, error) {
 	servicePort := app.Container.Docker.PortMappings[portIndex].ServicePort
 	name := PrettifyAppId(app.Id, portIndex, servicePort)
 
@@ -42,10 +43,19 @@ func (manager *UdpManager) GetFrontend(app *marathon.App, portIndex int, replace
 	}
 
 	addr := fmt.Sprintf("%v:%v", manager.BindAddr, servicePort)
-	sched := Multicast // TODO: configurable
+
+	var sched udpproxy.Scheduler
+	switch app.Labels["lb-mode"] {
+	case "multicast": // or call it "fanout"?
+		sched = udpproxy.Multicast
+	case "roundrobin":
+		sched = udpproxy.RoundRobin
+	default:
+		sched = udpproxy.RoundRobin
+	}
 
 	log.Printf("Spawn UDP frontend %v %v %v\n", addr, sched, name)
-	fe, err := NewUdpFrontend(name, addr, sched)
+	fe, err := udpproxy.NewFrontend(name, addr, sched)
 	if err != nil {
 		return nil, err
 	}
@@ -64,13 +74,15 @@ func (manager *UdpManager) ApplyApp(app *marathon.App) error {
 				// add backends
 				fe.ClearTouch()
 				for _, task := range app.Tasks {
-					name := fmt.Sprintf("%v-%v", task.Host, task.Id)
-					addr := fmt.Sprintf("%v:%v", task.Host, task.Ports[portIndex])
-					be, err := fe.AddBackend(name, addr)
-					if err != nil {
-						log.Printf("Failed to add backend %v %v. %v\n", name, addr, err)
-					} else {
-						be.Touch()
+					if task.IsAlive() {
+						name := fmt.Sprintf("%v-%v", task.Host, task.Id)
+						addr := fmt.Sprintf("%v:%v", task.Host, task.Ports[portIndex])
+						be, err := fe.AddBackend(name, addr)
+						if err != nil {
+							log.Printf("Failed to add backend %v %v. %v\n", name, addr, err)
+						} else {
+							be.Touch()
+						}
 					}
 				}
 				fe.RemoveUntouched()
