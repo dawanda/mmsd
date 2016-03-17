@@ -71,14 +71,14 @@ func FileIsIdentical(file1, file2 string) bool {
 	}
 }
 
-func Contains(slice []string, item string) (ok bool) {
-	set := make(map[string]struct{}, len(slice))
-	for _, s := range slice {
-		set[s] = struct{}{}
+func Contains(slice []string, item string) bool {
+	for _, value := range slice {
+		if value == item {
+			return true
+		}
 	}
 
-	_, ok = set[item]
-	return
+	return false
 }
 
 // Finds all missing items that are found in slice2 but not in slice1.
