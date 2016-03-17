@@ -822,6 +822,7 @@ class Mmsd # {{{
                   'gateway-http-port' => '80',
                   'gateway-https-port' => '443',
                   'upstream-confd' => '/var/run/mmsd/confd',
+                  'disable-upstream' => '',
                   'managed-ip' => '',
                   'log-level' => 'info'}
 
@@ -916,7 +917,10 @@ class Mmsd # {{{
     end
 
     handlers = []
-    handlers << UpstreamConfDirHandler.new(getopt('upstream-confd'), logger)
+    if getopt('disable-upstream') == '' then
+      handlers << UpstreamConfDirHandler.new(getopt('upstream-confd'), logger)
+    end
+
     handlers << HaproxyBuilder.new(getopt('haproxy-bin'),
                                    getopt('haproxy-cfg'),
                                    config_tail,
