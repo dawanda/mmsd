@@ -12,13 +12,24 @@ import (
 )
 
 type UpstreamFileManager struct {
-	BasePath string
+	Enabled  bool
 	Verbose  bool
+	BasePath string
 }
 
 func (upstream *UpstreamFileManager) Log(msg string) {
 	if upstream.Verbose {
 		log.Printf("upstream: %v\n", msg)
+	}
+}
+
+func (manager *UpstreamFileManager) IsEnabled() bool {
+	return manager.Enabled
+}
+
+func (manager *UpstreamFileManager) SetEnabled(value bool) {
+	if value != manager.Enabled {
+		manager.Enabled = value
 	}
 }
 

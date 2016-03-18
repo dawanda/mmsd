@@ -15,6 +15,8 @@ XXX Changes:
 * `--marathon-host` is now named `--marathon-ip` and only accepts IP addresses
 * `--reconnect-delay` added
 * `--haproxy-cfg` removed
+* `--gateway` renamed to `--enable-gateway`
+* `--enable-haproxy` added
 * also exposes service discovery API via HTTP endpoint
 
 */
@@ -40,6 +42,8 @@ import (
 type MmsdHandler interface {
 	Apply(apps []*marathon.App, force bool) error
 	Update(app *marathon.App, task *marathon.Task) error
+	IsEnabled() bool
+	SetEnabled(value bool)
 }
 
 type MmsdService struct {
@@ -53,6 +57,8 @@ type MmsdService struct {
 	GatewayPortHTTP  uint
 	GatewayPortHTTPS uint
 	ManagedIP        net.IP
+	FilesEnabled     bool
+	HaproxyEnabled   bool
 	HaproxyBin       string
 	HaproxyTailCfg   string
 	HaproxyPort      uint
@@ -176,7 +182,9 @@ func (mmsd *MmsdService) Update(appId string, taskId string, alive bool) {
 	task := app.GetTaskById(taskId)
 
 	for _, handler := range mmsd.Handlers {
-		handler.Update(app, task)
+		if handler.IsEnabled() {
+			handler.Update(app, task)
+		}
 	}
 }
 
@@ -192,9 +200,11 @@ func (mmsd *MmsdService) MaybeResetFromTasks(force bool) error {
 	}
 
 	for _, handler := range mmsd.Handlers {
-		err = handler.Apply(apps, force)
-		if err != nil {
-			log.Printf("Failed to apply changes to handler. %v\n", err)
+		if handler.IsEnabled() {
+			err = handler.Apply(apps, force)
+			if err != nil {
+				log.Printf("Failed to apply changes to handler. %v\n", err)
+			}
 		}
 	}
 
@@ -212,9 +222,11 @@ func (mmsd *MmsdService) Run() {
 	flag.StringVar(&mmsd.RunStateDir, "run-state-dir", mmsd.RunStateDir, "Path to directory to keep run-state")
 	flag.StringVar(&mmsd.FilterGroups, "filter-groups", mmsd.FilterGroups, "Application group filter")
 	flag.IPVar(&mmsd.ManagedIP, "managed-ip", mmsd.ManagedIP, "IP-address to manage for mmsd")
-	flag.BoolVar(&mmsd.GatewayEnabled, "gateway", mmsd.GatewayEnabled, "Enables gateway support")
+	flag.BoolVar(&mmsd.GatewayEnabled, "enable-gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-http-port", mmsd.GatewayPortHTTP, "gateway HTTP port")
 	flag.UintVar(&mmsd.GatewayPortHTTPS, "gateway-https-port", mmsd.GatewayPortHTTPS, "gateway HTTP port")
+	flag.BoolVar(&mmsd.HaproxyEnabled, "enable-haproxy", mmsd.HaproxyEnabled, "enables haproxy TCP load balancing")
+	flag.BoolVar(&mmsd.FilesEnabled, "enable-files", mmsd.FilesEnabled, "enables haproxy TCP load balancing")
 	flag.StringVar(&mmsd.HaproxyBin, "haproxy-bin", mmsd.HaproxyBin, "path to haproxy binary")
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceBind, "haproxy-bind", mmsd.ServiceBind, "haproxy management port")
@@ -252,6 +264,7 @@ func (mmsd *MmsdService) SetupHandlers() {
 			mmsd.Verbose,
 		),
 		&HaproxyMgr{
+			Enabled:        mmsd.HaproxyEnabled,
 			ConfigTailPath: mmsd.HaproxyTailCfg,
 			ConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg"),
 			PidFile:        filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
@@ -259,8 +272,9 @@ func (mmsd *MmsdService) SetupHandlers() {
 			ManagementPort: mmsd.HaproxyPort,
 		},
 		&UpstreamFileManager{
-			BasePath: mmsd.RunStateDir + "/confd",
+			Enabled:  mmsd.FilesEnabled,
 			Verbose:  mmsd.Verbose,
+			BasePath: mmsd.RunStateDir + "/confd",
 		},
 	}
 
@@ -282,6 +296,7 @@ func main() {
 		GatewayEnabled:   false,
 		GatewayPortHTTP:  80,
 		GatewayPortHTTPS: 443,
+		HaproxyEnabled:   false,
 		HaproxyBin:       "/usr/bin/haproxy",
 		HaproxyTailCfg:   "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:      8081,

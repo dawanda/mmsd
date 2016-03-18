@@ -8,12 +8,23 @@ import (
 )
 
 type HaproxyMgr struct {
+	Enabled        bool
 	Verbose        bool
 	ConfigPath     string
 	ConfigTailPath string
 	PidFile        string
 	ManagementAddr net.IP
 	ManagementPort uint
+}
+
+func (manager *HaproxyMgr) IsEnabled() bool {
+	return manager.Enabled
+}
+
+func (manager *HaproxyMgr) SetEnabled(value bool) {
+	if value != manager.Enabled {
+		manager.Enabled = value
+	}
 }
 
 func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {

@@ -9,6 +9,7 @@ import (
 )
 
 type UdpManager struct {
+	Enabled  bool
 	Verbose  bool
 	BindAddr net.IP
 	Servers  map[string]*udpproxy.Frontend
@@ -16,9 +17,20 @@ type UdpManager struct {
 
 func NewUdpManager(bindAddr net.IP, verbose bool) *UdpManager {
 	return &UdpManager{
+		Enabled:  true,
 		Verbose:  verbose,
 		BindAddr: bindAddr,
 		Servers:  make(map[string]*udpproxy.Frontend),
+	}
+}
+
+func (manager *UdpManager) IsEnabled() bool {
+	return manager.Enabled
+}
+
+func (manager *UdpManager) SetEnabled(value bool) {
+	if value != manager.Enabled {
+		manager.Enabled = value
 	}
 }
 
