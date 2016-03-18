@@ -25,6 +25,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -218,12 +219,13 @@ func (mmsd *MmsdService) Run() {
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceBind, "haproxy-bind", mmsd.ServiceBind, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
+
 	flag.Usage = func() {
-		fmt.Printf("mmsd - Mesos Marathon Service Discovery, version %v, licensed under %v\n", AppVersion, AppLicense)
-		fmt.Printf("Written by Christian Parpart <christian@dawanda.com>\n\n")
-		fmt.Printf("Usage: mmsd [flags ...]\n\n")
+		fmt.Fprintf(os.Stderr, "mmsd - Mesos Marathon Service Discovery, version %v, licensed under %v\n", AppVersion, AppLicense)
+		fmt.Fprintf(os.Stderr, "Written by Christian Parpart <christian@dawanda.com>\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: mmsd [flags ...]\n\n")
 		flag.PrintDefaults()
-		fmt.Printf("\n")
+		fmt.Fprintf(os.Stderr, "\n")
 	}
 
 	flag.Parse()
