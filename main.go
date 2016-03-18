@@ -271,7 +271,7 @@ func (mmsd *MmsdService) SetupHandlers() {
 			ManagementAddr: mmsd.ServiceBind,
 			ManagementPort: mmsd.HaproxyPort,
 		},
-		&UpstreamFileManager{
+		&FilesManager{
 			Enabled:  mmsd.FilesEnabled,
 			Verbose:  mmsd.Verbose,
 			BasePath: mmsd.RunStateDir + "/confd",

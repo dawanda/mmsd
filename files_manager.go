@@ -11,34 +11,34 @@ import (
 	"github.com/christianparpart/serviced/marathon"
 )
 
-type UpstreamFileManager struct {
+type FilesManager struct {
 	Enabled  bool
 	Verbose  bool
 	BasePath string
 }
 
-func (upstream *UpstreamFileManager) Log(msg string) {
+func (upstream *FilesManager) Log(msg string) {
 	if upstream.Verbose {
 		log.Printf("upstream: %v\n", msg)
 	}
 }
 
-func (manager *UpstreamFileManager) IsEnabled() bool {
+func (manager *FilesManager) IsEnabled() bool {
 	return manager.Enabled
 }
 
-func (manager *UpstreamFileManager) SetEnabled(value bool) {
+func (manager *FilesManager) SetEnabled(value bool) {
 	if value != manager.Enabled {
 		manager.Enabled = value
 	}
 }
 
-func (upstream *UpstreamFileManager) Update(app *marathon.App, task *marathon.Task) error {
+func (upstream *FilesManager) Update(app *marathon.App, task *marathon.Task) error {
 	_, err := upstream.writeApp(app)
 	return err
 }
 
-func (upstream *UpstreamFileManager) Apply(apps []*marathon.App, force bool) error {
+func (upstream *FilesManager) Apply(apps []*marathon.App, force bool) error {
 	err := os.MkdirAll(upstream.BasePath, 0770)
 	if err != nil {
 		return err
@@ -65,7 +65,7 @@ func (upstream *UpstreamFileManager) Apply(apps []*marathon.App, force bool) err
 	return nil
 }
 
-func (upstream *UpstreamFileManager) writeApp(app *marathon.App) ([]string, error) {
+func (upstream *FilesManager) writeApp(app *marathon.App) ([]string, error) {
 	var files []string
 
 	for portIndex, port := range app.Ports {
@@ -93,7 +93,7 @@ func (upstream *UpstreamFileManager) writeApp(app *marathon.App) ([]string, erro
 	return files, nil
 }
 
-func (upstream *UpstreamFileManager) writeFile(filename string, appId string,
+func (upstream *FilesManager) writeFile(filename string, appId string,
 	portIndex int, app *marathon.App) error {
 
 	var b bytes.Buffer
@@ -113,7 +113,7 @@ func (upstream *UpstreamFileManager) writeFile(filename string, appId string,
 	return ioutil.WriteFile(filename, b.Bytes(), 0660)
 }
 
-func (upstream *UpstreamFileManager) collectFiles() ([]string, error) {
+func (upstream *FilesManager) collectFiles() ([]string, error) {
 	fileInfos, err := ioutil.ReadDir(upstream.BasePath)
 	if err != nil {
 		upstream.Log(fmt.Sprintf("Error reading directory %v. %v", upstream.BasePath, err))
