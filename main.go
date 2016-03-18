@@ -16,7 +16,9 @@ XXX Changes:
 * `--reconnect-delay` added
 * `--haproxy-cfg` removed
 * `--gateway` renamed to `--enable-gateway`
-* `--enable-haproxy` added
+* `--enable-files` added
+* `--enable-tcp` added
+* `--enable-udp` added
 * also exposes service discovery API via HTTP endpoint
 
 */
@@ -59,7 +61,7 @@ type MmsdService struct {
 	ManagedIP        net.IP
 	FilesEnabled     bool
 	UdpEnabled       bool
-	HaproxyEnabled   bool
+	TcpEnabled       bool
 	HaproxyBin       string
 	HaproxyTailCfg   string
 	HaproxyPort      uint
@@ -226,7 +228,7 @@ func (mmsd *MmsdService) Run() {
 	flag.BoolVar(&mmsd.GatewayEnabled, "enable-gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-http-port", mmsd.GatewayPortHTTP, "gateway HTTP port")
 	flag.UintVar(&mmsd.GatewayPortHTTPS, "gateway-https-port", mmsd.GatewayPortHTTPS, "gateway HTTP port")
-	flag.BoolVar(&mmsd.HaproxyEnabled, "enable-haproxy", mmsd.HaproxyEnabled, "enables haproxy TCP load balancing")
+	flag.BoolVar(&mmsd.TcpEnabled, "enable-tcp", mmsd.TcpEnabled, "enables haproxy TCP load balancing")
 	flag.BoolVar(&mmsd.FilesEnabled, "enable-files", mmsd.FilesEnabled, "enables file based service discovery")
 	flag.BoolVar(&mmsd.UdpEnabled, "enable-udp", mmsd.UdpEnabled, "enables UDP load balancing")
 	flag.StringVar(&mmsd.HaproxyBin, "haproxy-bin", mmsd.HaproxyBin, "path to haproxy binary")
@@ -267,7 +269,7 @@ func (mmsd *MmsdService) SetupHandlers() {
 			mmsd.UdpEnabled,
 		),
 		&HaproxyMgr{
-			Enabled:        mmsd.HaproxyEnabled,
+			Enabled:        mmsd.TcpEnabled,
 			ConfigTailPath: mmsd.HaproxyTailCfg,
 			ConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg"),
 			PidFile:        filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
@@ -301,7 +303,7 @@ func main() {
 		GatewayPortHTTPS: 443,
 		FilesEnabled:     true,
 		UdpEnabled:       true,
-		HaproxyEnabled:   false,
+		TcpEnabled:       false,
 		HaproxyBin:       "/usr/bin/haproxy",
 		HaproxyTailCfg:   "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:      8081,
