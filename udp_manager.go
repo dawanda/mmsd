@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/christianparpart/serviced/marathon"
-	"github.com/dawanda/mmsd/udpproxy"
 	"log"
 	"net"
+
+	"github.com/christianparpart/serviced/marathon"
+	"github.com/dawanda/mmsd/udpproxy"
 )
 
 type UdpManager struct {

@@ -84,7 +84,7 @@ func (sse *EventSource) Run() {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
-	client := &http.Client{tr, nil, nil, 0 * time.Second}
+	var client = &http.Client{tr, nil, nil, 0 * time.Second}
 	req, err := http.NewRequest("GET", sse.Url, nil)
 	if err != nil && sse.OnError != nil {
 		sse.OnError("error", err.Error())

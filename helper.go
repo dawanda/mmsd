@@ -11,9 +11,9 @@ import (
 	"github.com/christianparpart/serviced/marathon"
 )
 
-func PrettifyAppId(name string, portIndex int, servicePort uint) (app_id string) {
-	app_id = strings.Replace(name[1:], "/", ".", -1)
-	app_id = fmt.Sprintf("%v-%v-%v", app_id, portIndex, servicePort)
+func PrettifyAppId(name string, portIndex int, servicePort uint) (appID string) {
+	appID = strings.Replace(name[1:], "/", ".", -1)
+	appID = fmt.Sprintf("%v-%v-%v", appID, portIndex, servicePort)
 
 	return
 }
