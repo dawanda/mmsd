@@ -41,14 +41,14 @@ import (
 	flag "github.com/ogier/pflag"
 )
 
-type MmsdHandler interface {
+type mmsdHandler interface {
 	Apply(apps []*marathon.App, force bool) error
 	Update(app *marathon.App, task *marathon.Task) error
 	IsEnabled() bool
 	SetEnabled(value bool)
 }
 
-type MmsdService struct {
+type mmsdService struct {
 	MarathonScheme   string
 	MarathonIP       net.IP
 	MarathonPort     uint
@@ -60,18 +60,18 @@ type MmsdService struct {
 	GatewayPortHTTPS uint
 	ManagedIP        net.IP
 	FilesEnabled     bool
-	UdpEnabled       bool
-	TcpEnabled       bool
+	UDPEnabled       bool
+	TCPEnabled       bool
 	HaproxyBin       string
 	HaproxyTailCfg   string
 	HaproxyPort      uint
 	ServiceBind      net.IP
 	ServicePort      uint
 	Verbose          bool
-	Handlers         []MmsdHandler
+	Handlers         []mmsdHandler
 }
 
-func (mmsd *MmsdService) v1_apps(w http.ResponseWriter, r *http.Request) {
+func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
 	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
 
 	if err != nil {
@@ -96,11 +96,11 @@ func (mmsd *MmsdService) v1_apps(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%s\n", strings.Join(appList, "\n"))
 }
 
-func (mmsd *MmsdService) v1_instances(w http.ResponseWriter, r *http.Request) {
+func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	name := vars["name"]
 
-	var portIndex int = 0
+	var portIndex int
 	if sval := r.URL.Query().Get("portIndex"); len(sval) != 0 {
 		i, err := strconv.Atoi(sval)
 		if err == nil {
@@ -137,11 +137,11 @@ func (mmsd *MmsdService) v1_instances(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (mmsd *MmsdService) SetupEventBusListener() {
-	var url string = fmt.Sprintf("http://%v:%v/v2/events",
+func (mmsd *mmsdService) SetupEventBusListener() {
+	var url = fmt.Sprintf("http://%v:%v/v2/events",
 		mmsd.MarathonIP, mmsd.MarathonPort)
 
-	var sse *EventSource = NewEventSource(url, mmsd.ReconnectDelay)
+	var sse = NewEventSource(url, mmsd.ReconnectDelay)
 
 	sse.OnOpen = func(event, data string) {
 		log.Printf("Listening for events from Marathon on %v\n", url)
@@ -154,7 +154,7 @@ func (mmsd *MmsdService) SetupEventBusListener() {
 		var event marathon.StatusUpdateEvent
 		json.Unmarshal([]byte(data), &event)
 
-		var alive bool = event.TaskStatus == marathon.TaskRunning
+		var alive = event.TaskStatus == marathon.TaskRunning
 		mmsd.Update(event.AppId, event.TaskId, alive)
 	})
 
@@ -168,7 +168,7 @@ func (mmsd *MmsdService) SetupEventBusListener() {
 }
 
 // enable/disable given app:task
-func (mmsd *MmsdService) Update(appId string, taskId string, alive bool) {
+func (mmsd *mmsdService) Update(appID string, taskID string, alive bool) {
 	// log.Printf("Update %v: %v (%v)\n", appId, taskId, alive)
 	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
 	if err != nil {
@@ -176,13 +176,13 @@ func (mmsd *MmsdService) Update(appId string, taskId string, alive bool) {
 		return
 	}
 
-	app, err := m.GetApp(appId)
+	app, err := m.GetApp(appID)
 	if err != nil {
-		log.Printf("Update: GetApp(%q) failed. %v\n", appId, err)
+		log.Printf("Update: GetApp(%q) failed. %v\n", appID, err)
 		return
 	}
 
-	task := app.GetTaskById(taskId)
+	task := app.GetTaskById(taskID)
 
 	for _, handler := range mmsd.Handlers {
 		if handler.IsEnabled() {
@@ -191,7 +191,7 @@ func (mmsd *MmsdService) Update(appId string, taskId string, alive bool) {
 	}
 }
 
-func (mmsd *MmsdService) MaybeResetFromTasks(force bool) error {
+func (mmsd *mmsdService) MaybeResetFromTasks(force bool) error {
 	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
 	if err != nil {
 		return err
@@ -214,10 +214,10 @@ func (mmsd *MmsdService) MaybeResetFromTasks(force bool) error {
 	return nil
 }
 
-const AppVersion = "0.1.0"
-const AppLicense = "MIT"
+const appVersion = "0.1.0"
+const appLicense = "MIT"
 
-func (mmsd *MmsdService) Run() {
+func (mmsd *mmsdService) Run() {
 	flag.BoolVarP(&mmsd.Verbose, "verbose", "v", mmsd.Verbose, "Set verbosity level")
 	flag.IPVar(&mmsd.MarathonIP, "marathon-ip", mmsd.MarathonIP, "Marathon endpoint TCP IP address")
 	flag.UintVar(&mmsd.MarathonPort, "marathon-port", mmsd.MarathonPort, "Marathon endpoint TCP port number")
@@ -228,16 +228,16 @@ func (mmsd *MmsdService) Run() {
 	flag.BoolVar(&mmsd.GatewayEnabled, "enable-gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-http-port", mmsd.GatewayPortHTTP, "gateway HTTP port")
 	flag.UintVar(&mmsd.GatewayPortHTTPS, "gateway-https-port", mmsd.GatewayPortHTTPS, "gateway HTTP port")
-	flag.BoolVar(&mmsd.TcpEnabled, "enable-tcp", mmsd.TcpEnabled, "enables haproxy TCP load balancing")
+	flag.BoolVar(&mmsd.TCPEnabled, "enable-tcp", mmsd.TCPEnabled, "enables haproxy TCP load balancing")
 	flag.BoolVar(&mmsd.FilesEnabled, "enable-files", mmsd.FilesEnabled, "enables file based service discovery")
-	flag.BoolVar(&mmsd.UdpEnabled, "enable-udp", mmsd.UdpEnabled, "enables UDP load balancing")
+	flag.BoolVar(&mmsd.UDPEnabled, "enable-udp", mmsd.UDPEnabled, "enables UDP load balancing")
 	flag.StringVar(&mmsd.HaproxyBin, "haproxy-bin", mmsd.HaproxyBin, "path to haproxy binary")
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceBind, "haproxy-bind", mmsd.ServiceBind, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "mmsd - Mesos Marathon Service Discovery, version %v, licensed under %v\n", AppVersion, AppLicense)
+		fmt.Fprintf(os.Stderr, "mmsd - Mesos Marathon Service Discovery, version %v, licensed under %v\n", appVersion, appLicense)
 		fmt.Fprintf(os.Stderr, "Written by Christian Parpart <christian@dawanda.com>\n\n")
 		fmt.Fprintf(os.Stderr, "Usage: mmsd [flags ...]\n\n")
 		flag.PrintDefaults()
@@ -252,8 +252,8 @@ func (mmsd *MmsdService) Run() {
 	// HTTP service
 	router := mux.NewRouter()
 	v1 := router.PathPrefix("/v1").Subrouter()
-	v1.HandleFunc("/apps", mmsd.v1_apps).Methods("GET")
-	v1.HandleFunc("/instances{name:/.*}", mmsd.v1_instances).Methods("GET")
+	v1.HandleFunc("/apps", mmsd.v1Apps).Methods("GET")
+	v1.HandleFunc("/instances{name:/.*}", mmsd.v1Instances).Methods("GET")
 
 	serviceAddr := fmt.Sprintf("%v:%v", mmsd.ServiceBind, mmsd.ServicePort)
 	log.Printf("Exposing service API on http://%v\n", serviceAddr)
@@ -261,15 +261,15 @@ func (mmsd *MmsdService) Run() {
 	http.ListenAndServe(serviceAddr, router)
 }
 
-func (mmsd *MmsdService) SetupHandlers() {
-	mmsd.Handlers = []MmsdHandler{
+func (mmsd *mmsdService) SetupHandlers() {
+	mmsd.Handlers = []mmsdHandler{
 		NewUdpManager(
 			mmsd.ServiceBind,
 			mmsd.Verbose,
-			mmsd.UdpEnabled,
+			mmsd.UDPEnabled,
 		),
 		&HaproxyMgr{
-			Enabled:        mmsd.TcpEnabled,
+			Enabled:        mmsd.TCPEnabled,
 			ConfigTailPath: mmsd.HaproxyTailCfg,
 			ConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg"),
 			PidFile:        filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
@@ -291,7 +291,7 @@ func (mmsd *MmsdService) SetupHandlers() {
 }
 
 func main() {
-	var mmsd MmsdService = MmsdService{
+	var mmsd = mmsdService{
 		MarathonScheme:   "http",
 		MarathonIP:       net.ParseIP("127.0.0.1"),
 		MarathonPort:     8080,
@@ -302,8 +302,8 @@ func main() {
 		GatewayPortHTTP:  80,
 		GatewayPortHTTPS: 443,
 		FilesEnabled:     true,
-		UdpEnabled:       true,
-		TcpEnabled:       false,
+		UDPEnabled:       true,
+		TCPEnabled:       false,
 		HaproxyBin:       "/usr/bin/haproxy",
 		HaproxyTailCfg:   "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:      8081,

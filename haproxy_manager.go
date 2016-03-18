@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/christianparpart/serviced/marathon"
 	"io/ioutil"
 	"net"
 	"os"
+
+	"github.com/christianparpart/serviced/marathon"
 )
 
 type HaproxyMgr struct {
