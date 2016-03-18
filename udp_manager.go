@@ -15,9 +15,9 @@ type UdpManager struct {
 	Servers  map[string]*udpproxy.Frontend
 }
 
-func NewUdpManager(bindAddr net.IP, verbose bool) *UdpManager {
+func NewUdpManager(bindAddr net.IP, verbose bool, enabled bool) *UdpManager {
 	return &UdpManager{
-		Enabled:  true,
+		Enabled:  enabled,
 		Verbose:  verbose,
 		BindAddr: bindAddr,
 		Servers:  make(map[string]*udpproxy.Frontend),
