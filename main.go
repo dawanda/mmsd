@@ -58,6 +58,7 @@ type MmsdService struct {
 	GatewayPortHTTPS uint
 	ManagedIP        net.IP
 	FilesEnabled     bool
+	UdpEnabled       bool
 	HaproxyEnabled   bool
 	HaproxyBin       string
 	HaproxyTailCfg   string
@@ -226,7 +227,8 @@ func (mmsd *MmsdService) Run() {
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-http-port", mmsd.GatewayPortHTTP, "gateway HTTP port")
 	flag.UintVar(&mmsd.GatewayPortHTTPS, "gateway-https-port", mmsd.GatewayPortHTTPS, "gateway HTTP port")
 	flag.BoolVar(&mmsd.HaproxyEnabled, "enable-haproxy", mmsd.HaproxyEnabled, "enables haproxy TCP load balancing")
-	flag.BoolVar(&mmsd.FilesEnabled, "enable-files", mmsd.FilesEnabled, "enables haproxy TCP load balancing")
+	flag.BoolVar(&mmsd.FilesEnabled, "enable-files", mmsd.FilesEnabled, "enables file based service discovery")
+	flag.BoolVar(&mmsd.UdpEnabled, "enable-udp", mmsd.UdpEnabled, "enables UDP load balancing")
 	flag.StringVar(&mmsd.HaproxyBin, "haproxy-bin", mmsd.HaproxyBin, "path to haproxy binary")
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceBind, "haproxy-bind", mmsd.ServiceBind, "haproxy management port")
@@ -262,6 +264,7 @@ func (mmsd *MmsdService) SetupHandlers() {
 		NewUdpManager(
 			mmsd.ServiceBind,
 			mmsd.Verbose,
+			mmsd.UdpEnabled,
 		),
 		&HaproxyMgr{
 			Enabled:        mmsd.HaproxyEnabled,
@@ -296,6 +299,8 @@ func main() {
 		GatewayEnabled:   false,
 		GatewayPortHTTP:  80,
 		GatewayPortHTTPS: 443,
+		FilesEnabled:     true,
+		UdpEnabled:       true,
 		HaproxyEnabled:   false,
 		HaproxyBin:       "/usr/bin/haproxy",
 		HaproxyTailCfg:   "/etc/mmsd/haproxy-tail.cfg",
