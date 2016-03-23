@@ -79,6 +79,9 @@ type mmsdService struct {
 
 func (mmsd *mmsdService) setupHttpService() {
 	router := mux.NewRouter()
+	router.HandleFunc("/ping", mmsd.v0Ping)
+	router.HandleFunc("/version", mmsd.v0Version)
+
 	v1 := router.PathPrefix("/v1").Subrouter()
 	v1.HandleFunc("/apps", mmsd.v1Apps).Methods("GET")
 	v1.HandleFunc("/instances{app_id:/.*}", mmsd.v1Instances).Methods("GET")
@@ -87,6 +90,14 @@ func (mmsd *mmsdService) setupHttpService() {
 	log.Printf("Exposing service API on http://%v\n", serviceAddr)
 
 	go http.ListenAndServe(serviceAddr, router)
+}
+
+func (mmsd *mmsdService) v0Ping(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, "pong\n")
+}
+
+func (mmsd *mmsdService) v0Version(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "mmsd %v\n", appVersion)
 }
 
 func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
