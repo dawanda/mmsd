@@ -3,17 +3,17 @@ package main
 /* TODO:
 
 1. [x] serve HTTP /v1/instances/:app_id to retrieve ip:port pairs for given app
-3. [x] implement UDP proxy (one-way/two-way, fanout (& roundrobin))
-2. [x] implement upstream-conf.d file management
+2. [x] implement UDP proxy (one-way/two-way, fanout (& roundrobin))
+3. [x] implement upstream-conf.d file management
 4. [ ] implement TCP proxy (with pluggable impls: haproxy, lvs, ...)
-5. [ ] implement HTTP(S) gateway support
-6. [ ] tcp-proxy: add `accept-proxy` support
-7. [ ] tcp-proxy: add `proxy-protocol` support
-8. [ ] logging: add readable up/down notices, such as:
+5. [ ] tcp-proxy: add `accept-proxy` support
+6. [ ] tcp-proxy: add `proxy-protocol` support
+7. [ ] logging: add readable up/down notices, such as:
 	- "APP_ID: Task $TASK_STATUS on host $HOSTNAME ($TASK_ID)."
 		with TASK_STATUS translating into readable ("killed", "finished", "running", ...)
 	- "APP_ID: Task on $HOSTNAME:$PORT is unhealthy ($TASK_ID)."
 	- "APP_ID: Task on $HOSTNAME:$PORT is healthy ($TASK_ID)."
+8. [ ] implement HTTP(S) gateway support
 
 XXX Changes:
 
