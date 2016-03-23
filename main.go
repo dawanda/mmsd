@@ -9,6 +9,11 @@ package main
 5. [ ] implement HTTP(S) gateway support
 6. [ ] tcp-proxy: add `accept-proxy` support
 7. [ ] tcp-proxy: add `proxy-protocol` support
+8. [ ] logging: add readable up/down notices, such as:
+	- "APP_ID: Task $TASK_STATUS on host $HOSTNAME ($TASK_ID)."
+		with TASK_STATUS translating into readable ("killed", "finished", "running", ...)
+	- "APP_ID: Task on $HOSTNAME:$PORT is unhealthy ($TASK_ID)."
+	- "APP_ID: Task on $HOSTNAME:$PORT is healthy ($TASK_ID)."
 
 XXX Changes:
 
