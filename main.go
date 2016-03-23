@@ -169,7 +169,7 @@ func (mmsd *mmsdService) SetupEventBusListener() {
 
 // enable/disable given app:task
 func (mmsd *mmsdService) Update(appID string, taskID string, alive bool) {
-	// log.Printf("Update %v: %v (%v)\n", appId, taskId, alive)
+	log.Printf("Update %v: %v (%v)\n", appID, taskID, alive)
 	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
 	if err != nil {
 		log.Printf("Update: NewService(%q, %v) failed. %v\n", mmsd.MarathonIP, mmsd.MarathonPort, err)
