@@ -217,6 +217,11 @@ func (mmsd *mmsdService) MaybeResetFromTasks(force bool) error {
 const appVersion = "0.1.0"
 const appLicense = "MIT"
 
+func showVersion() {
+	fmt.Fprintf(os.Stderr, "mmsd - Mesos Marathon Service Discovery, version %v, licensed under %v\n", appVersion, appLicense)
+	fmt.Fprintf(os.Stderr, "Written by Christian Parpart <christian@dawanda.com>\n")
+}
+
 func (mmsd *mmsdService) Run() {
 	flag.BoolVarP(&mmsd.Verbose, "verbose", "v", mmsd.Verbose, "Set verbosity level")
 	flag.IPVar(&mmsd.MarathonIP, "marathon-ip", mmsd.MarathonIP, "Marathon endpoint TCP IP address")
@@ -235,16 +240,21 @@ func (mmsd *mmsdService) Run() {
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceBind, "haproxy-bind", mmsd.ServiceBind, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
+	showVersionAndExit := flag.BoolP("version", "V", false, "Shows version and exits")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "mmsd - Mesos Marathon Service Discovery, version %v, licensed under %v\n", appVersion, appLicense)
-		fmt.Fprintf(os.Stderr, "Written by Christian Parpart <christian@dawanda.com>\n\n")
-		fmt.Fprintf(os.Stderr, "Usage: mmsd [flags ...]\n\n")
+		showVersion()
+		fmt.Fprintf(os.Stderr, "\nUsage: mmsd [flags ...]\n\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\n")
 	}
 
 	flag.Parse()
+
+	if *showVersionAndExit {
+		showVersion()
+		os.Exit(0)
+	}
 
 	mmsd.SetupHandlers()
 	mmsd.SetupEventBusListener()
