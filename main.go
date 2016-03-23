@@ -69,6 +69,19 @@ type mmsdService struct {
 	ServicePort      uint
 	Verbose          bool
 	Handlers         []mmsdHandler
+	quitChannel      chan bool
+}
+
+func (mmsd *mmsdService) setupHttpService() {
+	router := mux.NewRouter()
+	v1 := router.PathPrefix("/v1").Subrouter()
+	v1.HandleFunc("/apps", mmsd.v1Apps).Methods("GET")
+	v1.HandleFunc("/instances{app_id:/.*}", mmsd.v1Instances).Methods("GET")
+
+	serviceAddr := fmt.Sprintf("%v:%v", mmsd.ServiceBind, mmsd.ServicePort)
+	log.Printf("Exposing service API on http://%v\n", serviceAddr)
+
+	go http.ListenAndServe(serviceAddr, router)
 }
 
 func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +111,7 @@ func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
 
 func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	name := vars["name"]
+	app_id := vars["app_id"]
 
 	var portIndex int
 	if sval := r.URL.Query().Get("portIndex"); len(sval) != 0 {
@@ -115,7 +128,7 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app, err := m.GetApp(name)
+	app, err := m.GetApp(app_id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Printf("GetApp error. %v\n", err)
@@ -137,7 +150,7 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (mmsd *mmsdService) SetupEventBusListener() {
+func (mmsd *mmsdService) setupEventBusListener() {
 	var url = fmt.Sprintf("http://%v:%v/v2/events",
 		mmsd.MarathonIP, mmsd.MarathonPort)
 
@@ -256,22 +269,14 @@ func (mmsd *mmsdService) Run() {
 		os.Exit(0)
 	}
 
-	mmsd.SetupHandlers()
-	mmsd.SetupEventBusListener()
+	mmsd.setupHandlers()
+	mmsd.setupEventBusListener()
+	mmsd.setupHttpService()
 
-	// HTTP service
-	router := mux.NewRouter()
-	v1 := router.PathPrefix("/v1").Subrouter()
-	v1.HandleFunc("/apps", mmsd.v1Apps).Methods("GET")
-	v1.HandleFunc("/instances{name:/.*}", mmsd.v1Instances).Methods("GET")
-
-	serviceAddr := fmt.Sprintf("%v:%v", mmsd.ServiceBind, mmsd.ServicePort)
-	log.Printf("Exposing service API on http://%v\n", serviceAddr)
-
-	http.ListenAndServe(serviceAddr, router)
+	<-mmsd.quitChannel
 }
 
-func (mmsd *mmsdService) SetupHandlers() {
+func (mmsd *mmsdService) setupHandlers() {
 	mmsd.Handlers = []mmsdHandler{
 		NewUdpManager(
 			mmsd.ServiceBind,
@@ -320,6 +325,7 @@ func main() {
 		ServiceBind:      net.ParseIP("0.0.0.0"),
 		ServicePort:      8082,
 		Verbose:          false,
+		quitChannel:      make(chan bool),
 	}
 
 	mmsd.Run()
