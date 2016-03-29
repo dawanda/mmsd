@@ -127,7 +127,8 @@ func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
 
 func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	app_id := vars["app_id"]
+	appID := vars["app_id"]
+	noResolve := r.URL.Query().Get("noresolve") == "1"
 
 	var portIndex int
 	if sval := r.URL.Query().Get("portIndex"); len(sval) != 0 {
@@ -144,7 +145,7 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app, err := m.GetApp(app_id)
+	app, err := m.GetApp(appID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Printf("GetApp error. %v\n", err)
@@ -161,8 +162,34 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	// fmt.Fprintf(w, "\n")
 	// return
 
-	for _, task := range app.Tasks {
-		fmt.Fprintf(w, "%v:%v\n", task.Host, task.Ports[portIndex])
+	var list []string
+	if len(app.Ports) > portIndex {
+		for _, task := range app.Tasks {
+			list = append(list, fmt.Sprintf("%v:%v", resolveIPAddr(task.Host, noResolve), task.Ports[portIndex]))
+		}
+	} else {
+		for _, task := range app.Tasks {
+			list = append(list, fmt.Sprintf("%v\n", resolveIPAddr(task.Host, noResolve)))
+		}
+	}
+
+	sort.Strings(list)
+
+	for _, entry := range list {
+		fmt.Fprintln(w, entry)
+	}
+}
+
+func resolveIPAddr(dns string, skip bool) string {
+	if skip {
+		return dns
+	} else {
+		ip, err := net.ResolveIPAddr("ip", dns)
+		if err != nil {
+			return dns
+		} else {
+			return ip.String()
+		}
 	}
 }
 
