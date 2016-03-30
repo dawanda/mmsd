@@ -220,8 +220,16 @@ func (mmsd *mmsdService) setupEventBusListener() {
 		var event marathon.StatusUpdateEvent
 		json.Unmarshal([]byte(data), &event)
 
-		var alive = event.TaskStatus == marathon.TaskRunning
-		mmsd.Update(event.AppId, event.TaskId, alive)
+		switch event.TaskStatus {
+		case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
+			mmsd.Update(event.AppId, event.TaskId, false)
+		case marathon.TaskRunning:
+			// XXX we require our apps to always have health checks set,
+			// thus you'l always get a health_status_changed_event which will
+			// then lead to a task activation in the cluster.
+
+			// mmsd.Update(event.AppId, event.TaskId, true)
+		}
 	})
 
 	sse.AddEventListener("health_status_changed_event", func(data string) {
