@@ -217,15 +217,23 @@ func (mmsd *mmsdService) setupEventBusListener() {
 		json.Unmarshal([]byte(data), &event)
 
 		switch event.TaskStatus {
+		case marathon.TaskRunning:
+			app, err := mmsd.getMarathonApp(event.AppId)
+			if err != nil {
+				log.Printf("App %v task %v on %v is running but failed to fetch infos. %v\n",
+					event.AppId, event.TaskId, event.Host, err)
+				return
+			}
+
+			// XXX Only update propagate no health checks have been configured.
+			// So we consider thie TASK_RUNNING state as healthy-notice.
+			if len(app.HealthChecks) == 0 {
+				log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
+				mmsd.Update(event.AppId, event.TaskId, true)
+			}
 		case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
 			log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
 			mmsd.Update(event.AppId, event.TaskId, false)
-		case marathon.TaskRunning:
-			// XXX we require our apps to always have health checks set,
-			// thus you'l always get a health_status_changed_event which will
-			// then lead to a task activation in the cluster.
-
-			// mmsd.Update(event.AppId, event.TaskId, true)
 		}
 	})
 
