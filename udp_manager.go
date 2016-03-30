@@ -37,7 +37,7 @@ func (manager *UdpManager) SetEnabled(value bool) {
 
 func (manager *UdpManager) Apply(apps []*marathon.App, force bool) error {
 	for _, app := range apps {
-		err := manager.ApplyApp(app)
+		err := manager.applyApp(app)
 		if err != nil {
 			return err
 		}
@@ -77,7 +77,7 @@ func (manager *UdpManager) GetFrontend(app *marathon.App, portIndex int, replace
 	return fe, nil
 }
 
-func (manager *UdpManager) ApplyApp(app *marathon.App) error {
+func (manager *UdpManager) applyApp(app *marathon.App) error {
 	for portIndex := range app.Ports {
 		if GetTransportProtocol(app, portIndex) == "udp" {
 			fe, err := manager.GetFrontend(app, portIndex, true)
@@ -109,5 +109,5 @@ func (manager *UdpManager) ApplyApp(app *marathon.App) error {
 }
 
 func (manager *UdpManager) Update(app *marathon.App, task *marathon.Task) error {
-	return manager.ApplyApp(app)
+	return manager.applyApp(app)
 }
