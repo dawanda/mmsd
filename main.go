@@ -157,6 +157,11 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if portIndex >= len(app.Ports) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	if len(app.Tasks) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
