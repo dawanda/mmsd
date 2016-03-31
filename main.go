@@ -408,6 +408,16 @@ func (mmsd *mmsdService) setupHandlers() {
 	}
 }
 
+func locateExe(name string) string {
+	for _, prefix := range strings.Split(os.Getenv("PATH"), ":") {
+		path := filepath.Join(prefix, name)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return name // default to name only
+}
+
 func main() {
 	var mmsd = mmsdService{
 		MarathonScheme:   "http",
@@ -422,7 +432,7 @@ func main() {
 		FilesEnabled:     true,
 		UDPEnabled:       true,
 		TCPEnabled:       false,
-		HaproxyBin:       "/usr/bin/haproxy",
+		HaproxyBin:       locateExe("haproxy"),
 		HaproxyTailCfg:   "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:      8081,
 		ServiceBind:      net.ParseIP("0.0.0.0"),
