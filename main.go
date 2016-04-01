@@ -51,27 +51,28 @@ type mmsdHandler interface {
 }
 
 type mmsdService struct {
-	MarathonScheme   string
-	MarathonIP       net.IP
-	MarathonPort     uint
-	ReconnectDelay   time.Duration
-	RunStateDir      string
-	FilterGroups     string
-	GatewayEnabled   bool
-	GatewayPortHTTP  uint
-	GatewayPortHTTPS uint
-	ManagedIP        net.IP
-	FilesEnabled     bool
-	UDPEnabled       bool
-	TCPEnabled       bool
-	HaproxyBin       string
-	HaproxyTailCfg   string
-	HaproxyPort      uint
-	ServiceBind      net.IP
-	ServicePort      uint
-	Verbose          bool
-	Handlers         []mmsdHandler
-	quitChannel      chan bool
+	MarathonScheme    string
+	MarathonIP        net.IP
+	MarathonPort      uint
+	ReconnectDelay    time.Duration
+	RunStateDir       string
+	FilterGroups      string
+	GatewayEnabled    bool
+	GatewayPortHTTP   uint
+	GatewayPortHTTPS  uint
+	ManagedIP         net.IP
+	FilesEnabled      bool
+	UDPEnabled        bool
+	TCPEnabled        bool
+	LocalHealthChecks bool
+	HaproxyBin        string
+	HaproxyTailCfg    string
+	HaproxyPort       uint
+	ServiceBind       net.IP
+	ServicePort       uint
+	Verbose           bool
+	Handlers          []mmsdHandler
+	quitChannel       chan bool
 }
 
 func (mmsd *mmsdService) setupHttpService() {
@@ -374,9 +375,10 @@ func (mmsd *mmsdService) Run() {
 	flag.BoolVar(&mmsd.GatewayEnabled, "enable-gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-http-port", mmsd.GatewayPortHTTP, "gateway HTTP port")
 	flag.UintVar(&mmsd.GatewayPortHTTPS, "gateway-https-port", mmsd.GatewayPortHTTPS, "gateway HTTP port")
-	flag.BoolVar(&mmsd.TCPEnabled, "enable-tcp", mmsd.TCPEnabled, "enables haproxy TCP load balancing")
 	flag.BoolVar(&mmsd.FilesEnabled, "enable-files", mmsd.FilesEnabled, "enables file based service discovery")
 	flag.BoolVar(&mmsd.UDPEnabled, "enable-udp", mmsd.UDPEnabled, "enables UDP load balancing")
+	flag.BoolVar(&mmsd.TCPEnabled, "enable-tcp", mmsd.TCPEnabled, "enables haproxy TCP load balancing")
+	flag.BoolVar(&mmsd.LocalHealthChecks, "enable-health-checks", mmsd.LocalHealthChecks, "Enable local health checks (if available) instead of relying on Marathon health checks alone.")
 	flag.StringVar(&mmsd.HaproxyBin, "haproxy-bin", mmsd.HaproxyBin, "path to haproxy binary")
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceBind, "haproxy-bind", mmsd.ServiceBind, "haproxy management port")
@@ -412,16 +414,17 @@ func (mmsd *mmsdService) setupHandlers() {
 			mmsd.UDPEnabled,
 		),
 		&HaproxyMgr{
-			Enabled:        mmsd.TCPEnabled,
-			Verbose:        mmsd.Verbose,
-			Executable:     mmsd.HaproxyBin,
-			ConfigTailPath: mmsd.HaproxyTailCfg,
-			ConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg"),
-			OldConfigPath:  filepath.Join(mmsd.RunStateDir, "haproxy.cfg.old"),
-			PidFile:        filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
-			AdminSockPath:  filepath.Join(mmsd.RunStateDir, "haproxy.sock"),
-			ManagementAddr: mmsd.ServiceBind,
-			ManagementPort: mmsd.HaproxyPort,
+			Enabled:           mmsd.TCPEnabled,
+			Verbose:           mmsd.Verbose,
+			LocalHealthChecks: mmsd.LocalHealthChecks,
+			Executable:        mmsd.HaproxyBin,
+			ConfigTailPath:    mmsd.HaproxyTailCfg,
+			ConfigPath:        filepath.Join(mmsd.RunStateDir, "haproxy.cfg"),
+			OldConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg.old"),
+			PidFile:           filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
+			AdminSockPath:     filepath.Join(mmsd.RunStateDir, "haproxy.sock"),
+			ManagementAddr:    mmsd.ServiceBind,
+			ManagementPort:    mmsd.HaproxyPort,
 		},
 		&FilesManager{
 			Enabled:  mmsd.FilesEnabled,
@@ -449,25 +452,26 @@ func locateExe(name string) string {
 
 func main() {
 	var mmsd = mmsdService{
-		MarathonScheme:   "http",
-		MarathonIP:       net.ParseIP("127.0.0.1"),
-		MarathonPort:     8080,
-		ReconnectDelay:   time.Second * 4,
-		RunStateDir:      "/var/run/mmsd",
-		FilterGroups:     "*",
-		GatewayEnabled:   false,
-		GatewayPortHTTP:  80,
-		GatewayPortHTTPS: 443,
-		FilesEnabled:     true,
-		UDPEnabled:       true,
-		TCPEnabled:       true,
-		HaproxyBin:       locateExe("haproxy"),
-		HaproxyTailCfg:   "/etc/mmsd/haproxy-tail.cfg",
-		HaproxyPort:      8081,
-		ServiceBind:      net.ParseIP("0.0.0.0"),
-		ServicePort:      8082,
-		Verbose:          false,
-		quitChannel:      make(chan bool),
+		MarathonScheme:    "http",
+		MarathonIP:        net.ParseIP("127.0.0.1"),
+		MarathonPort:      8080,
+		ReconnectDelay:    time.Second * 4,
+		RunStateDir:       "/var/run/mmsd",
+		FilterGroups:      "*",
+		GatewayEnabled:    false,
+		GatewayPortHTTP:   80,
+		GatewayPortHTTPS:  443,
+		FilesEnabled:      true,
+		UDPEnabled:        true,
+		TCPEnabled:        true,
+		LocalHealthChecks: false,
+		HaproxyBin:        locateExe("haproxy"),
+		HaproxyTailCfg:    "/etc/mmsd/haproxy-tail.cfg",
+		HaproxyPort:       8081,
+		ServiceBind:       net.ParseIP("0.0.0.0"),
+		ServicePort:       8082,
+		Verbose:           false,
+		quitChannel:       make(chan bool),
 	}
 
 	mmsd.Run()

@@ -23,6 +23,7 @@ import (
 type HaproxyMgr struct {
 	Enabled            bool
 	Verbose            bool
+	LocalHealthChecks  bool
 	Executable         string
 	ConfigPath         string
 	ConfigTailPath     string
@@ -182,6 +183,14 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 
 			serverOpts := ""
 
+			if manager.LocalHealthChecks {
+				serverOpts += " check"
+			}
+
+			if healthCheck.IntervalSeconds > 0 {
+				serverOpts += fmt.Sprintf(" inter %v", healthCheck.IntervalSeconds*1000)
+			}
+
 			switch lbProxyProtocol {
 			case 2:
 				serverOpts += " send-proxy-v2"
@@ -204,8 +213,10 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 						"\n"+
 						"backend %v\n"+
 						"  mode http\n"+
-						"  balance leastconn\n",
-					appID, bindAddr, servicePort, bindOpts, appID, appID)
+						"  balance leastconn\n"+
+						"  option httpchk GET %v HTTP/1.1\\r\\nHost:\\ %v\n",
+					appID, bindAddr, servicePort, bindOpts, appID, appID,
+					healthCheck.Path, "health-check")
 			default:
 				result += fmt.Sprintf(
 					"listen %v\n"+
@@ -220,7 +231,8 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 			result += "  retries 1\n"
 
 			for _, task := range app.Tasks { // TODO: tasks must be always sorted
-				result += fmt.Sprintf("  server %v %v:%v %v\n",
+				result += fmt.Sprintf(
+					"  server %v %v:%v%v\n",
 					task.Id,
 					SoftResolveIPAddr(task.Host),
 					task.Ports[portIndex],
