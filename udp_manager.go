@@ -108,6 +108,10 @@ func (manager *UdpManager) applyApp(app *marathon.App) error {
 	return nil
 }
 
-func (manager *UdpManager) Update(app *marathon.App, task *marathon.Task) error {
+func (manager *UdpManager) Remove(app *marathon.App, taskID string) error {
+	return manager.applyApp(app)
+}
+
+func (manager *UdpManager) Update(app *marathon.App, taskID string) error {
 	return manager.applyApp(app)
 }

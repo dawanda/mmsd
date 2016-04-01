@@ -44,7 +44,8 @@ import (
 
 type mmsdHandler interface {
 	Apply(apps []*marathon.App, force bool) error
-	Update(app *marathon.App, task *marathon.Task) error
+	Update(app *marathon.App, taskID string) error
+	Remove(app *marathon.App, taskID string) error
 	IsEnabled() bool
 	SetEnabled(value bool)
 }
@@ -233,7 +234,18 @@ func (mmsd *mmsdService) setupEventBusListener() {
 			}
 		case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
 			log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
-			mmsd.Update(event.AppId, event.TaskId, false)
+
+			app, err := mmsd.getMarathonApp(event.AppId)
+			if err != nil {
+				log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
+				return
+			}
+			if app == nil {
+				log.Printf("App %v not found anymore.\n", event.AppId)
+				return
+			}
+
+			mmsd.Remove(app, event.TaskId)
 		}
 	})
 
@@ -253,6 +265,7 @@ func (mmsd *mmsdService) setupEventBusListener() {
 		task := app.GetTaskById(event.TaskId)
 		if task == nil {
 			log.Printf("App %v task %v not found anymore.\n", event.AppId, event.TaskId)
+			mmsd.Remove(app, event.TaskId)
 			return
 		}
 
@@ -298,11 +311,23 @@ func (mmsd *mmsdService) Update(appID string, taskID string, alive bool) {
 		return
 	}
 
-	task := app.GetTaskById(taskID)
-
 	for _, handler := range mmsd.Handlers {
 		if handler.IsEnabled() {
-			handler.Update(app, task)
+			err = handler.Update(app, taskID)
+			if err != nil {
+				log.Printf("Remove failed. %v\n", err)
+			}
+		}
+	}
+}
+
+func (mmsd *mmsdService) Remove(app *marathon.App, taskID string) {
+	for _, handler := range mmsd.Handlers {
+		if handler.IsEnabled() {
+			err := handler.Remove(app, taskID)
+			if err != nil {
+				log.Printf("Remove failed. %v\n", err)
+			}
 		}
 	}
 }
@@ -388,9 +413,13 @@ func (mmsd *mmsdService) setupHandlers() {
 		),
 		&HaproxyMgr{
 			Enabled:        mmsd.TCPEnabled,
+			Verbose:        mmsd.Verbose,
+			Executable:     mmsd.HaproxyBin,
 			ConfigTailPath: mmsd.HaproxyTailCfg,
 			ConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg"),
+			OldConfigPath:  filepath.Join(mmsd.RunStateDir, "haproxy.cfg.old"),
 			PidFile:        filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
+			AdminSockPath:  filepath.Join(mmsd.RunStateDir, "haproxy.sock"),
 			ManagementAddr: mmsd.ServiceBind,
 			ManagementPort: mmsd.HaproxyPort,
 		},
@@ -431,7 +460,7 @@ func main() {
 		GatewayPortHTTPS: 443,
 		FilesEnabled:     true,
 		UDPEnabled:       true,
-		TCPEnabled:       false,
+		TCPEnabled:       true,
 		HaproxyBin:       locateExe("haproxy"),
 		HaproxyTailCfg:   "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:      8081,

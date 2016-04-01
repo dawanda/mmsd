@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/christianparpart/serviced/marathon"
@@ -16,6 +18,25 @@ func PrettifyAppId(name string, portIndex int, servicePort uint) (appID string) 
 	appID = fmt.Sprintf("%v-%v-%v", appID, portIndex, servicePort)
 
 	return
+}
+
+func PrettifyDnsName(dns string) string {
+	return strings.SplitN(dns, ".", 1)[0]
+}
+
+var resolveMap = make(map[string]string)
+
+func SoftResolveIPAddr(dns string) string {
+	if value, ok := resolveMap[dns]; ok {
+		return value
+	}
+
+	if ip, err := net.ResolveIPAddr("ip", dns); err == nil {
+		return ip.String()
+	} else {
+		// fallback to actual dns name
+		return dns
+	}
 }
 
 // http://stackoverflow.com/a/30038571/386670
@@ -79,6 +100,14 @@ func Contains(slice []string, item string) bool {
 	}
 
 	return false
+}
+
+func Atoi(value string, defaultValue int) int {
+	if result, err := strconv.Atoi(value); err == nil {
+		return result
+	}
+
+	return defaultValue
 }
 
 // Finds all missing items that are found in slice2 but not in slice1.

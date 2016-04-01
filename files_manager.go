@@ -33,7 +33,12 @@ func (manager *FilesManager) SetEnabled(value bool) {
 	}
 }
 
-func (upstream *FilesManager) Update(app *marathon.App, task *marathon.Task) error {
+func (upstream *FilesManager) Remove(app *marathon.App, taskID string) error {
+	_, err := upstream.writeApp(app)
+	return err
+}
+
+func (upstream *FilesManager) Update(app *marathon.App, taskID string) error {
 	_, err := upstream.writeApp(app)
 	return err
 }
