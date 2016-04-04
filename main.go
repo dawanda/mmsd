@@ -464,7 +464,7 @@ func main() {
 		FilesEnabled:      true,
 		UDPEnabled:        true,
 		TCPEnabled:        true,
-		LocalHealthChecks: false,
+		LocalHealthChecks: true,
 		HaproxyBin:        locateExe("haproxy"),
 		HaproxyTailCfg:    "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:       8081,
