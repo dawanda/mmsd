@@ -226,11 +226,11 @@ func (mmsd *mmsdService) setupEventBusListener() {
 					event.AppId, event.TaskId, event.Host, err)
 				return
 			}
+			log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
 
 			// XXX Only update propagate no health checks have been configured.
 			// So we consider thie TASK_RUNNING state as healthy-notice.
 			if len(app.HealthChecks) == 0 {
-				log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
 				mmsd.Update(event.AppId, event.TaskId, true)
 			}
 		case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
