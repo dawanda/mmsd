@@ -34,6 +34,7 @@ type HaproxyMgr struct {
 	ManagementPort     uint
 	AdminSockPath      string
 	appConfigFragments map[string]string
+	appStateCache      map[string]*marathon.App
 }
 
 var (
@@ -52,6 +53,7 @@ func (manager *HaproxyMgr) SetEnabled(value bool) {
 
 func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 	manager.appConfigFragments = make(map[string]string)
+	manager.appStateCache = make(map[string]*marathon.App)
 
 	for _, app := range apps {
 		config, err := manager.makeConfig(app)
@@ -59,6 +61,7 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 			return err
 		}
 		manager.appConfigFragments[app.Id] = config
+		manager.appStateCache[app.Id] = app
 	}
 
 	err := manager.updateConfig()
@@ -77,6 +80,8 @@ func (manager *HaproxyMgr) Remove(app *marathon.App, taskID string) error {
 	}
 
 	manager.appConfigFragments[app.Id] = config
+	manager.appStateCache[app.Id] = app
+
 	err = manager.updateConfig()
 	if err != nil {
 		return err
@@ -86,12 +91,31 @@ func (manager *HaproxyMgr) Remove(app *marathon.App, taskID string) error {
 }
 
 func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
+	// collect list of task labels as we formatted them in haproxy.cfg.
+	var instanceNames []string
+	for portIndex, portMapping := range app.Container.Docker.PortMappings {
+		if portMapping.Protocol == "tcp" {
+			servicePort := portMapping.ServicePort
+			appID := PrettifyAppId(app.Id, portIndex, servicePort)
+			cachedTask := manager.appStateCache[app.Id].GetTaskById(taskID)
+			if cachedTask == nil {
+				cachedTask = app.GetTaskById(taskID)
+			}
+			if cachedTask != nil {
+				cachedTaskLabel := fmt.Sprintf("%v/%v:%v", appID, cachedTask.Host, cachedTask.Ports[portIndex])
+				instanceNames = append(instanceNames, cachedTaskLabel)
+			}
+		}
+	}
+
 	config, err := manager.makeConfig(app)
 	if err != nil {
 		return err
 	}
 
 	manager.appConfigFragments[app.Id] = config
+	manager.appStateCache[app.Id] = app
+
 	err = manager.updateConfig()
 	if err != nil {
 		return err
@@ -109,18 +133,17 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 		}
 	}
 
-	for portIndex, portMapping := range app.Container.Docker.PortMappings {
-		if portMapping.Protocol != "tcp" {
-			continue
-		}
-		servicePort := portMapping.ServicePort
-		appID := PrettifyAppId(app.Id, portIndex, servicePort)
+	// upstream server is already present, so send en enable or disable command
+	// to all app clusters of this name ($app-$portIndex-$servicePort/$taskLabel)
+	var updateCommandFmt string
+	if task != nil && task.IsAlive() {
+		updateCommandFmt = "enable server %v\n"
+	} else {
+		updateCommandFmt = "disable server %v\n"
+	}
 
-		if task != nil && task.IsAlive() {
-			err = manager.sendCommandf("enable server %v/%v\n", appID, taskID)
-		} else {
-			err = manager.sendCommandf("disable server %v/%v\n", appID, taskID)
-		}
+	for _, instanceName := range instanceNames {
+		err := manager.sendCommandf(updateCommandFmt, instanceName)
 		if err != nil {
 			return err
 		}
@@ -129,10 +152,9 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 	return nil
 }
 
-func (manager *HaproxyMgr) sendCommandf(cmd string, args ...interface{}) error {
-	log.Printf("[haproxy] send command "+cmd, args...)
-	// TODO: send command (with trailing "\n") to admin unix domain socket
-	cmd = fmt.Sprintf(cmd, args...)
+func (manager *HaproxyMgr) sendCommandf(cmdFmt string, args ...interface{}) error {
+	log.Printf("[haproxy] "+cmdFmt, args...)
+	cmd := fmt.Sprintf(cmdFmt, args...)
 	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{manager.AdminSockPath, "unix"})
 	if err != nil {
 		return err
@@ -233,8 +255,8 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 
 			for _, task := range sortTasks(app.Tasks) {
 				result += fmt.Sprintf(
-					"  server %v %v:%v%v\n",
-					task.Id,
+					"  server %v:%v %v:%v%v\n",
+					task.Host, task.Ports[portIndex], // taskLabel
 					SoftResolveIPAddr(task.Host),
 					task.Ports[portIndex],
 					serverOpts)
@@ -258,22 +280,28 @@ func getHealthCheckForPortIndex(healthChecks []marathon.HealthCheck, portIndex i
 }
 
 func (manager *HaproxyMgr) updateConfig() error {
-	config := manager.makeConfigHead()
-	for _, configFragment := range manager.appConfigFragments {
-		config += configFragment
+	config, err := manager.makeConfigHead()
+	if err != nil {
+		return err
 	}
 
-	if len(manager.ConfigTailPath) > 0 {
-		tail, err := ioutil.ReadFile(manager.ConfigTailPath)
-		if err != nil {
-			return err
-		}
-
-		config += string(tail)
+	var clusterNames []string
+	for name, _ := range manager.appConfigFragments {
+		clusterNames = append(clusterNames, name)
 	}
+	sort.Strings(clusterNames)
+	for _, name := range clusterNames {
+		config += manager.appConfigFragments[name]
+	}
+
+	tail, err := manager.makeConfigTail()
+	if err != nil {
+		return err
+	}
+	config += tail
 
 	tempConfigFile := fmt.Sprintf("%v.tmp", manager.ConfigPath)
-	err := ioutil.WriteFile(tempConfigFile, []byte(config), 0666)
+	err = ioutil.WriteFile(tempConfigFile, []byte(config), 0666)
 	if err != nil {
 		return err
 	}
@@ -293,7 +321,7 @@ func (manager *HaproxyMgr) updateConfig() error {
 	return os.Rename(tempConfigFile, manager.ConfigPath)
 }
 
-func (manager *HaproxyMgr) makeConfigHead() string {
+func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 	headerFragment := fmt.Sprintf(
 		"# This is an auto generated haproxy configuration!!!\n"+
 			"global\n"+
@@ -319,7 +347,20 @@ func (manager *HaproxyMgr) makeConfigHead() string {
 			"\n",
 		manager.ManagementAddr, manager.ManagementPort)
 
-	return headerFragment + mgntFragment
+	return headerFragment + mgntFragment, nil
+}
+
+func (manager *HaproxyMgr) makeConfigTail() (string, error) {
+	if len(manager.ConfigTailPath) == 0 {
+		return "", nil
+	}
+
+	tail, err := ioutil.ReadFile(manager.ConfigTailPath)
+	if err != nil {
+		return "", err
+	}
+
+	return string(tail), nil
 }
 
 func (manager *HaproxyMgr) reloadConfig() error {
@@ -363,17 +404,22 @@ func (manager *HaproxyMgr) reloadProcess(pid int) error {
 }
 
 func (manager *HaproxyMgr) exec(logMessage string, args ...string) error {
-	log.Printf("[haproxy] %v: %v %v\n", logMessage, manager.Executable, args)
 	proc := exec.Command(manager.Executable, args...)
 	output, err := proc.CombinedOutput()
+	logStarted := false
 
 	exitCode := proc.ProcessState.Sys().(syscall.WaitStatus)
 	if exitCode != 0 {
+		log.Printf("[haproxy] %v: %v %v\n", logMessage, manager.Executable, args)
+		logStarted = true
 		log.Printf("[haproxy] Bad exit code %v.\n", exitCode)
 		err = ErrBadExit
 	}
 
 	if exitCode != 0 || (manager.Verbose && len(output) != 0) {
+		if !logStarted {
+			log.Printf("[haproxy] %v: %v %v\n", logMessage, manager.Executable, args)
+		}
 		log.Println("[haproxy] command output:")
 		log.Println(strings.TrimSpace(string(output)))
 	}
