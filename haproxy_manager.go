@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -230,7 +231,7 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 			result += "  option redispatch\n"
 			result += "  retries 1\n"
 
-			for _, task := range app.Tasks { // TODO: tasks must be always sorted
+			for _, task := range sortTasks(app.Tasks) {
 				result += fmt.Sprintf(
 					"  server %v %v:%v%v\n",
 					task.Id,
@@ -378,4 +379,30 @@ func (manager *HaproxyMgr) exec(logMessage string, args ...string) error {
 	}
 
 	return err
+}
+
+// {{{ SortedTaskList
+
+type SortedTaskList []marathon.Task
+
+func (tasks SortedTaskList) Len() int {
+	return len(tasks)
+}
+
+func (tasks SortedTaskList) Less(i, j int) bool {
+	return tasks[i].Id < tasks[j].Id
+}
+
+func (tasks SortedTaskList) Swap(i, j int) {
+	tmp := tasks[i]
+	tasks[i] = tasks[j]
+	tasks[j] = tmp
+}
+
+// }}}
+
+func sortTasks(tasks []marathon.Task) []marathon.Task {
+	stl := SortedTaskList(tasks)
+	sort.Sort(stl)
+	return []marathon.Task(stl)
 }
