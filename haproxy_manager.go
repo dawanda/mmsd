@@ -34,7 +34,7 @@ type HaproxyMgr struct {
 	ManagementPort     uint
 	AdminSockPath      string
 	appConfigFragments map[string]string
-	appStateCache      map[string]*marathon.App
+	appStateCache      map[string]map[string]*marathon.Task
 }
 
 var (
@@ -53,7 +53,7 @@ func (manager *HaproxyMgr) SetEnabled(value bool) {
 
 func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 	manager.appConfigFragments = make(map[string]string)
-	manager.appStateCache = make(map[string]*marathon.App)
+	manager.appStateCache = make(map[string]map[string]*marathon.Task)
 
 	for _, app := range apps {
 		config, err := manager.makeConfig(app)
@@ -61,7 +61,10 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 			return err
 		}
 		manager.appConfigFragments[app.Id] = config
-		manager.appStateCache[app.Id] = app
+		manager.appStateCache[app.Id] = make(map[string]*marathon.Task)
+		for _, task := range app.Tasks {
+			manager.appStateCache[app.Id][task.Id] = &task
+		}
 	}
 
 	err := manager.updateConfig()
@@ -80,7 +83,7 @@ func (manager *HaproxyMgr) Remove(app *marathon.App, taskID string) error {
 	}
 
 	manager.appConfigFragments[app.Id] = config
-	manager.appStateCache[app.Id] = app
+	delete(manager.appStateCache[app.Id], taskID)
 
 	err = manager.updateConfig()
 	if err != nil {
@@ -97,8 +100,8 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 		if portMapping.Protocol == "tcp" {
 			servicePort := portMapping.ServicePort
 			appID := PrettifyAppId(app.Id, portIndex, servicePort)
-			cachedTask := manager.appStateCache[app.Id].GetTaskById(taskID)
-			if cachedTask == nil {
+			cachedTask, ok := manager.appStateCache[app.Id][taskID]
+			if !ok {
 				cachedTask = app.GetTaskById(taskID)
 			}
 			if cachedTask != nil {
@@ -114,7 +117,9 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 	}
 
 	manager.appConfigFragments[app.Id] = config
-	manager.appStateCache[app.Id] = app
+	for _, task := range app.Tasks {
+		manager.appStateCache[app.Id][task.Id] = &task
+	}
 
 	err = manager.updateConfig()
 	if err != nil {
