@@ -258,7 +258,7 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 			result += "  option redispatch\n"
 			result += "  retries 1\n"
 
-			for _, task := range sortTasks(app.Tasks) {
+			for _, task := range sortTasks(app.Tasks, portIndex) {
 				result += fmt.Sprintf(
 					"  server %v:%v %v:%v%v\n",
 					task.Host, task.Ports[portIndex], // taskLabel
@@ -434,26 +434,31 @@ func (manager *HaproxyMgr) exec(logMessage string, args ...string) error {
 
 // {{{ SortedTaskList
 
-type SortedTaskList []marathon.Task
+type SortedTaskList struct {
+	Tasks     []marathon.Task
+	PortIndex int
+}
 
 func (tasks SortedTaskList) Len() int {
-	return len(tasks)
+	return len(tasks.Tasks)
 }
 
 func (tasks SortedTaskList) Less(i, j int) bool {
-	return tasks[i].Id < tasks[j].Id
+	var a = &tasks.Tasks[i]
+	var b = &tasks.Tasks[j]
+	return a.Host < b.Host || a.Ports[tasks.PortIndex] < b.Ports[tasks.PortIndex]
 }
 
 func (tasks SortedTaskList) Swap(i, j int) {
-	tmp := tasks[i]
-	tasks[i] = tasks[j]
-	tasks[j] = tmp
+	tmp := tasks.Tasks[i]
+	tasks.Tasks[i] = tasks.Tasks[j]
+	tasks.Tasks[j] = tmp
 }
 
 // }}}
 
-func sortTasks(tasks []marathon.Task) []marathon.Task {
-	stl := SortedTaskList(tasks)
+func sortTasks(tasks []marathon.Task, portIndex int) []marathon.Task {
+	stl := SortedTaskList{Tasks: tasks, PortIndex: portIndex}
 	sort.Sort(stl)
-	return []marathon.Task(stl)
+	return stl.Tasks
 }
