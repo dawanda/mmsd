@@ -210,49 +210,53 @@ func (mmsd *mmsdService) setupEventBusListener() {
 	sse.OnOpen = func(event, data string) {
 		log.Printf("Listening for events from Marathon on %v\n", url)
 	}
+
 	sse.OnError = func(event, data string) {
 		log.Printf("Marathon Event Stream Error. %v. %v\n", event, data)
 	}
 
 	sse.AddEventListener("status_update_event", func(data string) {
 		var event marathon.StatusUpdateEvent
-		json.Unmarshal([]byte(data), &event)
-
-		switch event.TaskStatus {
-		case marathon.TaskRunning:
-			app, err := mmsd.getMarathonApp(event.AppId)
-			if err != nil {
-				log.Printf("App %v task %v on %v is running but failed to fetch infos. %v\n",
-					event.AppId, event.TaskId, event.Host, err)
-				return
-			}
-			log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
-
-			// XXX Only update propagate no health checks have been configured.
-			// So we consider thie TASK_RUNNING state as healthy-notice.
-			if len(app.HealthChecks) == 0 {
-				mmsd.Update(event.AppId, event.TaskId, true)
-			}
-		case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
-			log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
-
-			app, err := mmsd.getMarathonApp(event.AppId)
-			if err != nil {
-				log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
-				return
-			}
-			if app == nil {
-				log.Printf("App %v not found anymore.\n", event.AppId)
-				return
-			}
-
-			mmsd.Remove(app, event.TaskId)
+		err := json.Unmarshal([]byte(data), &event)
+		if err != nil {
+			log.Printf("Failed to unmarshal status_update_event. %v\n", err)
+		} else {
+			mmsd.statusUpdateEvent(&event)
 		}
 	})
 
 	sse.AddEventListener("health_status_changed_event", func(data string) {
 		var event marathon.HealthStatusChangedEvent
-		json.Unmarshal([]byte(data), &event)
+		err := json.Unmarshal([]byte(data), &event)
+		if err != nil {
+			log.Printf("Failed to unmarshal health_status_changed_event. %v\n", err)
+		} else {
+			mmsd.healthStatusChangedEvent(&event)
+		}
+	})
+
+	go sse.RunForever()
+}
+
+func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
+	switch event.TaskStatus {
+	case marathon.TaskRunning:
+		app, err := mmsd.getMarathonApp(event.AppId)
+		if err != nil {
+			log.Printf("App %v task %v on %v is running but failed to fetch infos. %v\n",
+				event.AppId, event.TaskId, event.Host, err)
+			return
+		}
+		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
+
+		// XXX Only update propagate no health checks have been configured.
+		// So we consider thie TASK_RUNNING state as healthy-notice.
+		if len(app.HealthChecks) == 0 {
+			mmsd.Update(event.AppId, event.TaskId, true)
+		}
+	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
+		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
+
 		app, err := mmsd.getMarathonApp(event.AppId)
 		if err != nil {
 			log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
@@ -263,25 +267,37 @@ func (mmsd *mmsdService) setupEventBusListener() {
 			return
 		}
 
-		task := app.GetTaskById(event.TaskId)
-		if task == nil {
-			log.Printf("App %v task %v not found anymore.\n", event.AppId, event.TaskId)
-			mmsd.Remove(app, event.TaskId)
-			return
-		}
+		mmsd.Remove(app, event.TaskId)
+	}
+}
 
-		// app & task definitely do exist, so propagate health change event
+func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusChangedEvent) {
+	app, err := mmsd.getMarathonApp(event.AppId)
+	if err != nil {
+		log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
+		return
+	}
+	if app == nil {
+		log.Printf("App %v not found anymore.\n", event.AppId)
+		return
+	}
 
-		if event.Alive {
-			log.Printf("App %v task %v on %v is healthy.\n", event.AppId, event.TaskId, task.Host)
-		} else {
-			log.Printf("App %v task %v on %v is unhealthy.\n", event.AppId, event.TaskId, task.Host)
-		}
+	task := app.GetTaskById(event.TaskId)
+	if task == nil {
+		log.Printf("App %v task %v not found anymore.\n", event.AppId, event.TaskId)
+		mmsd.Remove(app, event.TaskId)
+		return
+	}
 
-		mmsd.Update(event.AppId, event.TaskId, event.Alive)
-	})
+	// app & task definitely do exist, so propagate health change event
 
-	go sse.RunForever()
+	if event.Alive {
+		log.Printf("App %v task %v on %v is healthy.\n", event.AppId, event.TaskId, task.Host)
+	} else {
+		log.Printf("App %v task %v on %v is unhealthy.\n", event.AppId, event.TaskId, task.Host)
+	}
+
+	mmsd.Update(event.AppId, event.TaskId, event.Alive)
 }
 
 func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
