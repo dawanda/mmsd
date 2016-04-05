@@ -2,6 +2,8 @@ package main
 
 /* TODO:
 
+0. [ ] PrettifyAppId should not need portIndex
+
 1. [x] serve HTTP /v1/instances/:app_id to retrieve ip:port pairs for given app
 2. [x] implement UDP proxy (one-way/two-way, fanout (& roundrobin))
 3. [x] implement upstream-conf.d file management
@@ -45,7 +47,7 @@ import (
 type mmsdHandler interface {
 	Apply(apps []*marathon.App, force bool) error
 	Update(app *marathon.App, taskID string) error
-	Remove(app *marathon.App, taskID string) error
+	Remove(appID string, taskID string, app *marathon.App) error
 	IsEnabled() bool
 	SetEnabled(value bool)
 }
@@ -256,18 +258,12 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 		}
 	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
 		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
-
 		app, err := mmsd.getMarathonApp(event.AppId)
 		if err != nil {
 			log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
 			return
 		}
-		if app == nil {
-			log.Printf("App %v not found anymore.\n", event.AppId)
-			return
-		}
-
-		mmsd.Remove(app, event.TaskId)
+		mmsd.Remove(event.AppId, event.TaskId, app)
 	}
 }
 
@@ -285,7 +281,7 @@ func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusCh
 	task := app.GetTaskById(event.TaskId)
 	if task == nil {
 		log.Printf("App %v task %v not found anymore.\n", event.AppId, event.TaskId)
-		mmsd.Remove(app, event.TaskId)
+		mmsd.Remove(event.AppId, event.TaskId, app)
 		return
 	}
 
@@ -338,10 +334,10 @@ func (mmsd *mmsdService) Update(appID string, taskID string, alive bool) {
 	}
 }
 
-func (mmsd *mmsdService) Remove(app *marathon.App, taskID string) {
+func (mmsd *mmsdService) Remove(appID string, taskID string, app *marathon.App) {
 	for _, handler := range mmsd.Handlers {
 		if handler.IsEnabled() {
-			err := handler.Remove(app, taskID)
+			err := handler.Remove(appID, taskID, app)
 			if err != nil {
 				log.Printf("Remove failed. %v\n", err)
 			}

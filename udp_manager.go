@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 
 	"github.com/christianparpart/serviced/marathon"
 	"github.com/dawanda/mmsd/udpproxy"
@@ -77,6 +78,23 @@ func (manager *UdpManager) GetFrontend(app *marathon.App, portIndex int, replace
 	return fe, nil
 }
 
+func (manager *UdpManager) removeApp(appID string) error {
+	var removals []string
+
+	for name, _ := range manager.Servers {
+		if strings.HasPrefix(name, appID) {
+			removals = append(removals, name)
+		}
+	}
+
+	for _, name := range removals {
+		manager.Servers[name].Close()
+		delete(manager.Servers, name)
+	}
+
+	return nil
+}
+
 func (manager *UdpManager) applyApp(app *marathon.App) error {
 	for portIndex := range app.Ports {
 		if GetTransportProtocol(app, portIndex) == "udp" {
@@ -108,8 +126,12 @@ func (manager *UdpManager) applyApp(app *marathon.App) error {
 	return nil
 }
 
-func (manager *UdpManager) Remove(app *marathon.App, taskID string) error {
-	return manager.applyApp(app)
+func (manager *UdpManager) Remove(appID string, taskID string, app *marathon.App) error {
+	if app != nil {
+		return manager.applyApp(app)
+	} else {
+		return manager.removeApp(appID)
+	}
 }
 
 func (manager *UdpManager) Update(app *marathon.App, taskID string) error {

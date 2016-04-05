@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,7 +54,7 @@ func (manager *HaproxyMgr) SetEnabled(value bool) {
 
 func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 	manager.appConfigFragments = make(map[string]string)
-	manager.appStateCache = make(map[string]map[string]*marathon.Task)
+	manager.clearAppStateCache()
 
 	for _, app := range apps {
 		config, err := manager.makeConfig(app)
@@ -61,9 +62,8 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 			return err
 		}
 		manager.appConfigFragments[app.Id] = config
-		manager.appStateCache[app.Id] = make(map[string]*marathon.Task)
 		for _, task := range app.Tasks {
-			manager.appStateCache[app.Id][task.Id] = &task
+			manager.setAppStateCacheEntry(&task)
 		}
 	}
 
@@ -75,17 +75,27 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 	return manager.reloadConfig()
 }
 
-func (manager *HaproxyMgr) Remove(app *marathon.App, taskID string) error {
-	// make sure we *remove* the task from the cluster
-	config, err := manager.makeConfig(app)
-	if err != nil {
-		return err
+func (manager *HaproxyMgr) Remove(appID string, taskID string, app *marathon.App) error {
+	if app != nil {
+		// make sure we *remove* the task from the cluster
+		config, err := manager.makeConfig(app)
+		if err != nil {
+			return err
+		}
+		if len(app.Tasks) > 0 {
+			// app removed one task, still at least one alive
+			manager.appConfigFragments[appID] = config
+		} else {
+			// app suspended (or scaled down to zero)
+			delete(manager.appConfigFragments, appID)
+		}
+	} else {
+		// app destroyed fully
+		delete(manager.appConfigFragments, appID)
 	}
+	manager.removeAppStateCacheEntry(appID, taskID)
 
-	manager.appConfigFragments[app.Id] = config
-	delete(manager.appStateCache[app.Id], taskID)
-
-	err = manager.updateConfig()
+	err := manager.updateConfig()
 	if err != nil {
 		return err
 	}
@@ -96,12 +106,11 @@ func (manager *HaproxyMgr) Remove(app *marathon.App, taskID string) error {
 func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 	// collect list of task labels as we formatted them in haproxy.cfg.
 	var instanceNames []string
-	for portIndex, portMapping := range app.Container.Docker.PortMappings {
-		if portMapping.Protocol == "tcp" {
-			servicePort := portMapping.ServicePort
+	for portIndex, servicePort := range app.Ports {
+		if GetTransportProtocol(app, portIndex) == "tcp" {
 			appID := PrettifyAppId(app.Id, portIndex, servicePort)
-			cachedTask, ok := manager.appStateCache[app.Id][taskID]
-			if !ok {
+			cachedTask := manager.getAppStateCacheEntry(app.Id, taskID)
+			if cachedTask == nil {
 				cachedTask = app.GetTaskById(taskID)
 			}
 			if cachedTask != nil {
@@ -118,7 +127,7 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 
 	manager.appConfigFragments[app.Id] = config
 	for _, task := range app.Tasks {
-		manager.appStateCache[app.Id][task.Id] = &task
+		manager.setAppStateCacheEntry(&task)
 	}
 
 	err = manager.updateConfig()
@@ -186,25 +195,19 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 	var lbAcceptProxy = Atoi(app.Labels["lb-accept-proxy"], 0)
 	var lbProxyProtocol = Atoi(app.Labels["lb-proxy-protocol"], 0)
 
-	for portIndex, portMapping := range app.Container.Docker.PortMappings {
-		if portMapping.Protocol == "tcp" {
-			servicePort := portMapping.ServicePort
+	for portIndex, servicePort := range app.Ports {
+		if GetTransportProtocol(app, portIndex) == "tcp" {
 			appID := PrettifyAppId(app.Id, portIndex, servicePort)
 			bindAddr := manager.ManagementAddr
-			healthCheck := getHealthCheckForPortIndex(app.HealthChecks, portIndex)
-
-			appProtocol := app.Labels["proto"]
-			if len(appProtocol) == 0 {
-				appProtocol = healthCheck.Protocol
-
-				if len(appProtocol) == 0 {
-					appProtocol = portMapping.Protocol
-				}
-			}
-			appProtocol = strings.ToLower(appProtocol)
+			healthCheck := GetHealthCheckForPortIndex(app.HealthChecks, portIndex)
+			appProtocol := GetApplicationProtocol(app, portIndex)
 
 			bindOpts := ""
-			//TODO (only on linux) bindOpts += " defer-accept"
+
+			if runtime.GOOS == "linux" { // only enable on Linux (known to work)
+				bindOpts += " defer-accept"
+			}
+
 			if lbAcceptProxy != 0 {
 				bindOpts += " accept-proxy"
 			}
@@ -245,6 +248,32 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 						"  option httpchk GET %v HTTP/1.1\\r\\nHost:\\ %v\n",
 					appID, bindAddr, servicePort, bindOpts, appID, appID,
 					healthCheck.Path, "health-check")
+			case "redis-master", "redis-server", "redis":
+				result += fmt.Sprintf(
+					"listen %v\n"+
+						"  bind %v:%v%v\n"+
+						"  option dontlognull\n"+
+						"  mode tcp\n"+
+						"  balance leastconn\n"+
+						"  option tcp-check\n"+
+						"  tcp-check connect\n"+
+						"  tcp-check send PING\\r\\n\n"+
+						"  tcp-check expect string +PONG\n"+
+						"  tcp-check send info\\ replication\\r\\n\n"+
+						"  tcp-check expect string role:master\n"+
+						"  tcp-check send QUIT\\r\\n\n"+
+						"  tcp-check expect string +OK\n",
+					appID, bindAddr, servicePort, bindOpts)
+			case "smtp":
+				result += fmt.Sprintf(
+					"listen %v\n"+
+						"  bind %v:%v%v\n"+
+						"  option dontlognull\n"+
+						"  mode tcp\n"+
+						"  balance leastconn\n"+
+						"  option tcp-check\n"+
+						"  option smtpchk EHLO localhost\n",
+					appID, bindAddr, servicePort, bindOpts)
 			default:
 				result += fmt.Sprintf(
 					"listen %v\n"+
@@ -261,7 +290,7 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 			for _, task := range sortTasks(app.Tasks, portIndex) {
 				result += fmt.Sprintf(
 					"  server %v:%v %v:%v%v\n",
-					task.Host, task.Ports[portIndex], // taskLabel
+					task.Host, task.Ports[portIndex], // taskLabel == "$host:$port"
 					SoftResolveIPAddr(task.Host),
 					task.Ports[portIndex],
 					serverOpts)
@@ -272,16 +301,6 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 	}
 
 	return result, nil
-}
-
-func getHealthCheckForPortIndex(healthChecks []marathon.HealthCheck, portIndex int) marathon.HealthCheck {
-	for _, hs := range healthChecks {
-		if hs.PortIndex == portIndex {
-			return hs
-		}
-	}
-
-	return marathon.HealthCheck{}
 }
 
 func (manager *HaproxyMgr) updateConfig() error {
@@ -430,6 +449,38 @@ func (manager *HaproxyMgr) exec(logMessage string, args ...string) error {
 	}
 
 	return err
+}
+
+func (manager *HaproxyMgr) clearAppStateCache() {
+	manager.appStateCache = make(map[string]map[string]*marathon.Task)
+}
+
+func (manager *HaproxyMgr) getAppStateCacheEntry(appID, taskID string) *marathon.Task {
+	if app, ok := manager.appStateCache[appID]; ok {
+		if task, ok := app[taskID]; ok {
+			return task
+		}
+	}
+	return nil
+}
+
+func (manager *HaproxyMgr) setAppStateCacheEntry(task *marathon.Task) {
+	app, ok := manager.appStateCache[task.AppId]
+	if !ok {
+		app = make(map[string]*marathon.Task)
+		manager.appStateCache[task.AppId] = app
+	}
+	app[task.Id] = task
+}
+
+func (manager *HaproxyMgr) removeAppStateCacheEntry(appID, taskID string) {
+	if len(manager.appStateCache[appID]) != 0 {
+		delete(manager.appStateCache[appID], taskID)
+
+		if len(manager.appStateCache[appID]) == 0 {
+			delete(manager.appStateCache, appID)
+		}
+	}
 }
 
 // {{{ SortedTaskList

@@ -33,9 +33,14 @@ func (manager *FilesManager) SetEnabled(value bool) {
 	}
 }
 
-func (upstream *FilesManager) Remove(app *marathon.App, taskID string) error {
-	_, err := upstream.writeApp(app)
-	return err
+func (upstream *FilesManager) Remove(appID string, taskID string, app *marathon.App) error {
+	if app != nil {
+		_, err := upstream.writeApp(app)
+		return err
+	} else {
+		// TODO: remove files for app-$portIndex
+		return nil
+	}
 }
 
 func (upstream *FilesManager) Update(app *marathon.App, taskID string) error {

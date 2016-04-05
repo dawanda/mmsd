@@ -143,7 +143,11 @@ func GetTransportProtocol(app *marathon.App, portIndex int) string {
 		return strings.ToLower(app.Container.Docker.PortMappings[portIndex].Protocol)
 	}
 
-	return ""
+	if len(app.Ports) > 0 {
+		return "tcp" // default to TCP if at least one port was exposed (host networking)
+	}
+
+	return "" // no ports exposed
 }
 
 func GetHealthCheckProtocol(app *marathon.App, portIndex int) string {
@@ -154,4 +158,14 @@ func GetHealthCheckProtocol(app *marathon.App, portIndex int) string {
 	}
 
 	return ""
+}
+
+func GetHealthCheckForPortIndex(healthChecks []marathon.HealthCheck, portIndex int) marathon.HealthCheck {
+	for _, hs := range healthChecks {
+		if hs.PortIndex == portIndex {
+			return hs
+		}
+	}
+
+	return marathon.HealthCheck{}
 }
