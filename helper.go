@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log"
 	"net"
@@ -168,4 +169,10 @@ func GetHealthCheckForPortIndex(healthChecks []marathon.HealthCheck, portIndex i
 	}
 
 	return marathon.HealthCheck{}
+}
+
+func Hash(s string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return h.Sum32()
 }

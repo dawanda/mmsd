@@ -130,6 +130,7 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["app_id"]
 	noResolve := r.URL.Query().Get("noresolve") == "1"
+	withServerID := r.URL.Query().Get("withid") == "1"
 
 	var portIndex int
 	if sval := r.URL.Query().Get("portIndex"); len(sval) != 0 {
@@ -174,14 +175,17 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	// return
 
 	var list []string
-	if len(app.Ports) > portIndex {
-		for _, task := range app.Tasks {
-			list = append(list, fmt.Sprintf("%v:%v", resolveIPAddr(task.Host, noResolve), task.Ports[portIndex]))
+	for _, task := range app.Tasks {
+		item := ""
+		if withServerID {
+			item += fmt.Sprintf("%v:", Hash(task.SlaveId))
 		}
-	} else {
-		for _, task := range app.Tasks {
-			list = append(list, fmt.Sprintf("%v\n", resolveIPAddr(task.Host, noResolve)))
+		item += resolveIPAddr(task.Host, noResolve)
+		if len(app.Ports) > portIndex {
+			item += fmt.Sprintf(":%d", task.Ports[portIndex])
 		}
+
+		list = append(list, item)
 	}
 
 	sort.Strings(list)
