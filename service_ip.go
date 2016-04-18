@@ -37,7 +37,7 @@ func (service *ServiceIP) sh(cmd string, args ...interface{}) int {
 		return 1
 	} else {
 		exitCode := proc.ProcessState.Sys().(syscall.WaitStatus)
-		log.Printf("Error executing: %v\n", cmdline)
+		log.Printf("Error executing (exit code %v): %v\n", exitCode, cmdline)
 		log.Println(strings.TrimSpace(string(output)))
 		return int(exitCode)
 	}
