@@ -227,6 +227,7 @@ func (mmsd *mmsdService) setupEventBusListener() {
 		err := json.Unmarshal([]byte(data), &event)
 		if err != nil {
 			log.Printf("Failed to unmarshal status_update_event. %v\n", err)
+			log.Printf("status_update_event: %+v\n", data)
 		} else {
 			mmsd.statusUpdateEvent(&event)
 		}
