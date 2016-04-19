@@ -334,7 +334,7 @@ func (mmsd *mmsdService) Update(appID string, taskID string, alive bool) {
 		if handler.IsEnabled() {
 			err = handler.Update(app, taskID)
 			if err != nil {
-				log.Printf("Remove failed. %v\n", err)
+				log.Printf("Update failed. %v\n", err)
 			}
 		}
 	}
