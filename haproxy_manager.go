@@ -72,7 +72,7 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 		return err
 	}
 
-	return manager.reloadConfig()
+	return manager.reloadConfig(false)
 }
 
 func (manager *HaproxyMgr) Remove(appID string, taskID string, app *marathon.App) error {
@@ -100,7 +100,7 @@ func (manager *HaproxyMgr) Remove(appID string, taskID string, app *marathon.App
 		return err
 	}
 
-	return manager.reloadConfig()
+	return manager.reloadConfig(false)
 }
 
 func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
@@ -142,7 +142,7 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 	if task != nil && task.IsAlive() {
 		for _, hsr := range task.HealthCheckResults {
 			if hsr.LastFailure == nil { // because we never had a failure before
-				return manager.reloadConfig()
+				return manager.reloadConfig(true)
 			}
 		}
 	}
@@ -387,8 +387,8 @@ func (manager *HaproxyMgr) makeConfigTail() (string, error) {
 	return string(tail), nil
 }
 
-func (manager *HaproxyMgr) reloadConfig() error {
-	if FileIsIdentical(manager.ConfigPath, manager.OldConfigPath) {
+func (manager *HaproxyMgr) reloadConfig(force bool) error {
+	if !force && FileIsIdentical(manager.ConfigPath, manager.OldConfigPath) {
 		log.Printf("[haproxy] config file not changed. ignoring reload\n")
 		return nil
 	}
