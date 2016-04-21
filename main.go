@@ -28,6 +28,7 @@ XXX Changes:
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -126,18 +127,63 @@ func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%s\n", strings.Join(appList, "\n"))
 }
 
+var ErrInvalidPortRange = errors.New("Invalid port range")
+
+func parseRange(input string) (int, int, error) {
+	if len(input) == 0 {
+		return 0, 0, nil
+	}
+
+	vals := strings.Split(input, ":")
+	log.Printf("vals: %+q\n", vals)
+
+	if len(vals) == 1 {
+		i, err := strconv.Atoi(input)
+		return i, i, err
+	}
+
+	if len(vals) > 2 {
+		return 0, 0, ErrInvalidPortRange
+	}
+
+	var (
+		begin int
+		end   int
+		err   error
+	)
+
+	// parse begin
+	if vals[0] != "" {
+		begin, err = strconv.Atoi(vals[0])
+		if err != nil {
+			return begin, end, err
+		}
+	}
+
+	// parse end
+	if vals[1] != "" {
+		end, err = strconv.Atoi(vals[1])
+		if begin > end {
+			return begin, end, ErrInvalidPortRange
+		}
+	} else {
+		end = -1 // XXX that is: until the end
+	}
+
+	return begin, end, err
+}
+
 func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["app_id"]
 	noResolve := r.URL.Query().Get("noresolve") == "1"
 	withServerID := r.URL.Query().Get("withid") == "1"
 
-	var portIndex int
-	if sval := r.URL.Query().Get("portIndex"); len(sval) != 0 {
-		i, err := strconv.Atoi(sval)
-		if err == nil {
-			portIndex = i
-		}
+	portBegin, portEnd, err := parseRange(r.URL.Query().Get("portIndex"))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		log.Printf("error parsing range. %v\n", err)
+		return
 	}
 
 	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
@@ -159,9 +205,14 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if portIndex >= len(app.Ports) {
+	log.Printf("parseRange: %v .. %v (%v)\n", portBegin, portEnd, len(app.Ports))
+
+	if portEnd >= len(app.Ports) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
+	}
+	if portEnd < 0 {
+		portEnd = len(app.Ports) - 1
 	}
 
 	if len(app.Tasks) == 0 {
@@ -183,11 +234,7 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 
 		item += resolveIPAddr(task.Host, noResolve)
 
-		if portIndex < 0 && len(task.Ports) > 0 {
-			for _, port := range task.Ports {
-				item += fmt.Sprintf(":%d", port)
-			}
-		} else if len(app.Ports) > portIndex {
+		for portIndex := portBegin; portIndex <= portEnd; portIndex++ {
 			item += fmt.Sprintf(":%d", task.Ports[portIndex])
 		}
 
