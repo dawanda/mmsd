@@ -180,8 +180,14 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 		if withServerID {
 			item += fmt.Sprintf("%v:", Hash(task.SlaveId))
 		}
+
 		item += resolveIPAddr(task.Host, noResolve)
-		if len(app.Ports) > portIndex {
+
+		if portIndex < 0 && len(task.Ports) > 0 {
+			for _, port := range task.Ports {
+				item += fmt.Sprintf(":%d", port)
+			}
+		} else if len(app.Ports) > portIndex {
 			item += fmt.Sprintf(":%d", task.Ports[portIndex])
 		}
 
