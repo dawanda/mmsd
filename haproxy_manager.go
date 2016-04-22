@@ -67,7 +67,7 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 		}
 	}
 
-	err := manager.updateConfig()
+	err := manager.writeConfig()
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func (manager *HaproxyMgr) Remove(appID string, taskID string, app *marathon.App
 	}
 	manager.removeAppStateCacheEntry(appID, taskID)
 
-	err := manager.updateConfig()
+	err := manager.writeConfig()
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 		manager.setAppStateCacheEntry(&task)
 	}
 
-	err = manager.updateConfig()
+	err = manager.writeConfig()
 	if err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 	return result, nil
 }
 
-func (manager *HaproxyMgr) updateConfig() error {
+func (manager *HaproxyMgr) writeConfig() error {
 	config, err := manager.makeConfigHead()
 	if err != nil {
 		return err
