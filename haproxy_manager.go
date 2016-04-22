@@ -103,6 +103,23 @@ func (manager *HaproxyMgr) Remove(appID string, taskID string, app *marathon.App
 	return manager.reloadConfig(false)
 }
 
+func isAppJustSpawned(app *marathon.App) bool {
+	// find out if an app has just been spawned by checking
+	// if it ever failed already.
+
+	if len(app.Tasks) == 0 {
+		return false
+	}
+
+	for _, hsr := range app.Tasks[0].HealthCheckResults {
+		if hsr.LastFailure != nil {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 	// collect list of task labels as we formatted them in haproxy.cfg.
 	var instanceNames []string
@@ -140,10 +157,10 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 	// go right away reload the config if that is the first start of the
 	// underlying task and we got just health
 	if task != nil && task.IsAlive() {
-		for _, hsr := range task.HealthCheckResults {
-			if hsr.LastFailure == nil { // because we never had a failure before
-				return manager.reloadConfig(true)
-			}
+		// no health checks defined or app got just spawned the first time?
+		if len(app.HealthChecks) == 0 || isAppJustSpawned(app) {
+			log.Printf("[haproxy] nodes becomes healthy (or alive) first time. force reload config.\n")
+			return manager.reloadConfig(true)
 		}
 	}
 
