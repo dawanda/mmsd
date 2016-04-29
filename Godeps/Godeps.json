@@ -3,8 +3,8 @@
 	"GoVersion": "go1.6",
 	"Deps": [
 		{
-			"ImportPath": "github.com/christianparpart/serviced/marathon",
-			"Rev": "fbc64232d52725085fb2278fe3ab2748ca55a94e"
+			"ImportPath": "github.com/christianparpart/go-marathon/marathon",
+			"Rev": "06dc7a17e808cc6dbb829d0bfa3af53b8d2f0b99"
 		},
 		{
 			"ImportPath": "github.com/gorilla/context",

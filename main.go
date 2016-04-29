@@ -41,7 +41,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/christianparpart/serviced/marathon"
+	"github.com/christianparpart/go-marathon/marathon"
 	"github.com/gorilla/mux"
 	flag "github.com/ogier/pflag"
 )
