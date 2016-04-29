@@ -19,13 +19,18 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/christianparpart/serviced/marathon"
+	"github.com/christianparpart/go-marathon/marathon"
 )
 
 type HaproxyMgr struct {
 	Enabled            bool
 	Verbose            bool
 	LocalHealthChecks  bool
+	FilterGroups       []string
+	GatewayEnabled     bool
+	GatewayAddr        net.IP
+	GatewayPortHTTP    uint
+	GatewayPortHTTPS   uint
 	Executable         string
 	ConfigPath         string
 	ConfigTailPath     string
@@ -34,8 +39,9 @@ type HaproxyMgr struct {
 	ManagementAddr     net.IP
 	ManagementPort     uint
 	AdminSockPath      string
-	appConfigFragments map[string]string
-	appStateCache      map[string]map[string]*marathon.Task
+	appConfigFragments map[string]string                    // [appId] = haproxy_config_fragment
+	appLabels          map[string]map[string]string         // [appId][key] = value
+	appStateCache      map[string]map[string]*marathon.Task // [appId][task] = Task
 }
 
 var (
@@ -211,6 +217,12 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 
 	var lbAcceptProxy = Atoi(app.Labels["lb-accept-proxy"], 0)
 	var lbProxyProtocol = Atoi(app.Labels["lb-proxy-protocol"], 0)
+
+	// import application labels
+	manager.appLabels[app.Id] = make(map[string]string)
+	for k, v := range app.Labels {
+		manager.appLabels[app.Id][k] = v
+	}
 
 	for portIndex, servicePort := range app.Ports {
 		if GetTransportProtocol(app, portIndex) == "tcp" {
@@ -388,7 +400,32 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 			"\n",
 		manager.ManagementAddr, manager.ManagementPort)
 
-	return headerFragment + mgntFragment, nil
+	gatewayHTTP := manager.makeGatewayHTTP()
+	gatewayHTTPS := manager.makeGatewayHTTPS()
+
+	return headerFragment + mgntFragment + gatewayHTTP + gatewayHTTPS, nil
+}
+
+func (manager *HaproxyMgr) makeGatewayHTTP() string {
+	var fragment string
+
+	fragment += fmt.Sprintf(
+		"frontend __gateway_http\n"+
+			"  bind %v:%v\n"+
+			"  mode http\n"+
+			"  option http-server-close\n"+
+			"  reqadd X-Forwarded-Proto:\\ http\n"+
+			"\n",
+		manager.GatewayAddr,
+		manager.GatewayPortHTTP)
+
+	// TODO
+
+	return fragment
+}
+
+func (manager *HaproxyMgr) makeGatewayHTTPS() string {
+	return ""
 }
 
 func (manager *HaproxyMgr) makeConfigTail() (string, error) {
