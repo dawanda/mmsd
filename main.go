@@ -55,29 +55,44 @@ type mmsdHandler interface {
 }
 
 type mmsdService struct {
-	MarathonScheme    string
-	MarathonIP        net.IP
-	MarathonPort      uint
-	ReconnectDelay    time.Duration
-	RunStateDir       string
-	FilterGroups      string
-	GatewayEnabled    bool
-	GatewayAddr       net.IP
-	GatewayPortHTTP   uint
-	GatewayPortHTTPS  uint
-	ManagedIP         net.IP
-	FilesEnabled      bool
-	UDPEnabled        bool
-	TCPEnabled        bool
-	LocalHealthChecks bool
-	HaproxyBin        string
-	HaproxyTailCfg    string
-	HaproxyPort       uint
-	ServiceAddr       net.IP
-	ServicePort       uint
+	HttpApiPort       uint
 	Verbose           bool
 	Handlers          []mmsdHandler
 	quitChannel       chan bool
+	RunStateDir       string
+	FilterGroups      string
+	LocalHealthChecks bool
+	ManagementAddr    net.IP
+
+	// common application service discovery configuration
+	ServiceAddr net.IP
+
+	// service discovery IP-management
+	ManagedIP net.IP
+
+	// file based service discovery
+	FilesEnabled bool
+
+	// marathon endpoint configuration
+	MarathonScheme string
+	MarathonIP     net.IP
+	MarathonPort   uint
+	ReconnectDelay time.Duration // martahon event stream reconnect delay
+
+	// gateway configuration
+	GatewayEnabled   bool
+	GatewayAddr      net.IP
+	GatewayPortHTTP  uint
+	GatewayPortHTTPS uint
+
+	// tcp load balancing (haproxy)
+	TCPEnabled     bool
+	HaproxyBin     string
+	HaproxyTailCfg string
+	HaproxyPort    uint
+
+	// udp load balancing
+	UDPEnabled bool
 }
 
 func (mmsd *mmsdService) setupHttpService() {
@@ -89,7 +104,7 @@ func (mmsd *mmsdService) setupHttpService() {
 	v1.HandleFunc("/apps", mmsd.v1Apps).Methods("GET")
 	v1.HandleFunc("/instances{app_id:/.*}", mmsd.v1Instances).Methods("GET")
 
-	serviceAddr := fmt.Sprintf("%v:%v", mmsd.ServiceAddr, mmsd.ServicePort)
+	serviceAddr := fmt.Sprintf("%v:%v", mmsd.ServiceAddr, mmsd.HttpApiPort)
 	log.Printf("Exposing service API on http://%v\n", serviceAddr)
 
 	go http.ListenAndServe(serviceAddr, router)
@@ -510,7 +525,7 @@ func (mmsd *mmsdService) setupHandlers() {
 			OldConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg.old"),
 			PidFile:           filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
 			AdminSockPath:     filepath.Join(mmsd.RunStateDir, "haproxy.sock"),
-			ManagementAddr:    mmsd.ServiceAddr,
+			ManagementAddr:    mmsd.ManagementAddr,
 			ManagementPort:    mmsd.HaproxyPort,
 		},
 		&FilesManager{
@@ -556,8 +571,9 @@ func main() {
 		HaproxyBin:        locateExe("haproxy"),
 		HaproxyTailCfg:    "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:       8081,
+		ManagementAddr:    net.ParseIP("0.0.0.0"),
 		ServiceAddr:       net.ParseIP("0.0.0.0"),
-		ServicePort:       8082,
+		HttpApiPort:       8082,
 		Verbose:           false,
 		quitChannel:       make(chan bool),
 	}
