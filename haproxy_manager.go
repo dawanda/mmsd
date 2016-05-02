@@ -45,11 +45,17 @@ type HaproxyMgr struct {
 	appStateCache      map[string]map[string]*marathon.Task // [appId][task] = Task
 	vhosts             map[string]string                    // [appId] = vhost
 	vhostDefault       string
+	vhostsHTTPS        map[string]string
+	vhostDefaultHTTPS  string
 }
 
 const (
-	LB_PROXY_PROTOCOL = "lb-proxy-protocol"
-	LB_ACCEPT_PROXY   = "lb-accept-proxy"
+	LB_PROXY_PROTOCOL      = "lb-proxy-protocol"
+	LB_ACCEPT_PROXY        = "lb-accept-proxy"
+	LB_VHOST_HTTP          = "lb-vhost"
+	LB_VHOST_DEFAULT_HTTP  = "lb-vhost-default"
+	LB_VHOST_HTTPS         = "lb-vhost-ssl"
+	LB_VHOST_DEFAULT_HTTPS = "lb-vhost-default-ssl"
 )
 
 var (
@@ -72,6 +78,9 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 
 	manager.vhosts = make(map[string]string)
 	manager.vhostDefault = ""
+
+	manager.vhostsHTTPS = make(map[string]string)
+	manager.vhostDefaultHTTPS = ""
 
 	for _, app := range apps {
 		config, err := manager.makeConfig(app)
@@ -265,16 +274,29 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 	var healthCheck = GetHealthCheckForPortIndex(app.HealthChecks, portIndex)
 	var appProtocol = GetApplicationProtocol(app, portIndex)
 
-	var lbVirtualHost = portDef.Labels["lb-vhost"]
+	var lbVirtualHost = portDef.Labels[LB_VHOST_HTTP]
 	if len(lbVirtualHost) != 0 {
 		manager.vhosts[appID] = lbVirtualHost
-		if portDef.Labels["lb-vhost-default"] == "1" {
+		if portDef.Labels[LB_VHOST_DEFAULT_HTTP] == "1" {
 			manager.vhostDefault = appID
 		}
 	} else {
 		delete(manager.vhosts, appID)
 		if manager.vhostDefault == appID {
 			manager.vhostDefault = ""
+		}
+	}
+
+	lbVirtualHost = portDef.Labels[LB_VHOST_HTTPS]
+	if len(lbVirtualHost) != 0 {
+		manager.vhostsHTTPS[appID] = lbVirtualHost
+		if portDef.Labels[LB_VHOST_DEFAULT_HTTPS] == "1" {
+			manager.vhostDefaultHTTPS = appID
+		}
+	} else {
+		delete(manager.vhostsHTTPS, appID)
+		if manager.vhostDefaultHTTPS == appID {
+			manager.vhostDefaultHTTPS = ""
 		}
 	}
 
@@ -457,10 +479,10 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 
 func (manager *HaproxyMgr) makeGatewayHTTP() string {
 	var (
-		suffixMatches []string
 		suffixRoutes  map[string]string = make(map[string]string)
-		exactMatches  []string
+		suffixMatches []string
 		exactRoutes   map[string]string = make(map[string]string)
+		exactMatches  []string
 		vhostDefault  string
 		port          uint = manager.GatewayPortHTTP
 	)
@@ -496,14 +518,9 @@ func (manager *HaproxyMgr) makeGatewayHTTP() string {
 		manager.GatewayAddr,
 		port)
 
-	for _, exactMatch := range exactMatches {
-		fragment += exactMatch
-	}
-
-	for _, suffixMatch := range suffixMatches {
-		fragment += suffixMatch
-	}
-
+	// write ACL statements
+	fragment += strings.Join(exactMatches, "")
+	fragment += strings.Join(suffixMatches, "")
 	if len(exactMatches) != 0 || len(suffixMatches) != 0 {
 		fragment += "\n"
 	}
@@ -526,7 +543,69 @@ func (manager *HaproxyMgr) makeGatewayHTTP() string {
 }
 
 func (manager *HaproxyMgr) makeGatewayHTTPS() string {
-	return ""
+	// SNI vhost selector
+	var (
+		suffixRoutes  map[string]string = make(map[string]string)
+		suffixMatches []string
+		exactRoutes   map[string]string = make(map[string]string)
+		exactMatches  []string
+		vhostDefault  string
+		port          uint = manager.GatewayPortHTTPS
+	)
+
+	for appID, vhost := range manager.vhostsHTTPS {
+		matchToken := "vhost_ssl_" + vhost
+		matchToken = strings.Replace(matchToken, ".", "_", -1)
+		matchToken = strings.Replace(matchToken, "*", "STAR", -1)
+
+		if len(vhost) >= 3 && vhost[0] == '*' && vhost[1] == '.' {
+			suffixMatches = append(suffixMatches,
+				fmt.Sprintf("  acl %v req_ssl_sni -m dom %v\n", matchToken, strings.SplitN(vhost, ".", 2)[1]))
+			suffixRoutes[matchToken] = appID
+		} else {
+			exactMatches = append(exactMatches,
+				fmt.Sprintf("  acl %v req_ssl_sni -i %v\n", matchToken, vhost))
+			exactRoutes[matchToken] = appID
+		}
+
+		if manager.vhostDefaultHTTPS == appID {
+			vhostDefault = appID
+		}
+	}
+
+	var fragment string
+	fragment += fmt.Sprintf(
+		"frontend __gateway_https\n"+
+			"  bind %v:%v\n"+
+			"  mode tcp\n"+
+			"  tcp-request inspect-delay 5s\n"+
+			"  tcp-request content accept if { req_ssl_hello_type 1 }\n"+
+			"\n",
+		manager.GatewayAddr,
+		port)
+
+	// write ACL statements
+	fragment += strings.Join(exactMatches, "")
+	fragment += strings.Join(suffixMatches, "")
+	if len(exactMatches) != 0 || len(suffixMatches) != 0 {
+		fragment += "\n"
+	}
+
+	for acl, appID := range exactRoutes {
+		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
+	}
+
+	for acl, appID := range suffixRoutes {
+		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
+	}
+
+	fragment += "\n"
+
+	if len(vhostDefault) != 0 {
+		fragment += fmt.Sprintf("  default_backend %v\n\n", vhostDefault)
+	}
+
+	return fragment
 }
 
 func (manager *HaproxyMgr) makeConfigTail() (string, error) {
