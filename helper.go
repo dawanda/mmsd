@@ -140,11 +140,15 @@ func GetApplicationProtocol(app *marathon.App, portIndex int) (proto string) {
 }
 
 func GetTransportProtocol(app *marathon.App, portIndex int) string {
+	if len(app.PortDefinitions) > portIndex {
+		return app.PortDefinitions[portIndex].Protocol
+	}
+
 	if app.Container.Docker != nil && len(app.Container.Docker.PortMappings) > portIndex {
 		return strings.ToLower(app.Container.Docker.PortMappings[portIndex].Protocol)
 	}
 
-	if len(app.Ports) > 0 {
+	if len(app.PortDefinitions) > 0 {
 		return "tcp" // default to TCP if at least one port was exposed (host networking)
 	}
 

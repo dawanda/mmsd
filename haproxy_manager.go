@@ -27,6 +27,7 @@ type HaproxyMgr struct {
 	Verbose            bool
 	LocalHealthChecks  bool
 	FilterGroups       []string
+	ServiceAddr        net.IP
 	GatewayEnabled     bool
 	GatewayAddr        net.IP
 	GatewayPortHTTP    uint
@@ -42,7 +43,14 @@ type HaproxyMgr struct {
 	appConfigFragments map[string]string                    // [appId] = haproxy_config_fragment
 	appLabels          map[string]map[string]string         // [appId][key] = value
 	appStateCache      map[string]map[string]*marathon.Task // [appId][task] = Task
+	vhosts             map[string]string                    // [appId] = vhost
+	vhostDefault       string
 }
+
+const (
+	LB_PROXY_PROTOCOL = "lb-proxy-protocol"
+	LB_ACCEPT_PROXY   = "lb-accept-proxy"
+)
 
 var (
 	ErrBadExit = errors.New("Bad Process Exit.")
@@ -61,6 +69,9 @@ func (manager *HaproxyMgr) SetEnabled(value bool) {
 func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 	manager.appConfigFragments = make(map[string]string)
 	manager.clearAppStateCache()
+
+	manager.vhosts = make(map[string]string)
+	manager.vhostDefault = ""
 
 	for _, app := range apps {
 		config, err := manager.makeConfig(app)
@@ -215,121 +226,156 @@ func (manager *HaproxyMgr) sendCommandf(cmdFmt string, args ...interface{}) erro
 func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 	var result string
 
-	var lbAcceptProxy = Atoi(app.Labels["lb-accept-proxy"], 0)
-	var lbProxyProtocol = Atoi(app.Labels["lb-proxy-protocol"], 0)
-
 	// import application labels
+	if manager.appLabels == nil {
+		manager.appLabels = make(map[string]map[string]string)
+	}
 	manager.appLabels[app.Id] = make(map[string]string)
 	for k, v := range app.Labels {
 		manager.appLabels[app.Id][k] = v
 	}
 
-	for portIndex, servicePort := range app.Ports {
-		if GetTransportProtocol(app, portIndex) == "tcp" {
-			appID := PrettifyAppId(app.Id, portIndex, servicePort)
-			bindAddr := manager.ManagementAddr
-			healthCheck := GetHealthCheckForPortIndex(app.HealthChecks, portIndex)
-			appProtocol := GetApplicationProtocol(app, portIndex)
-
-			bindOpts := ""
-
-			if runtime.GOOS == "linux" { // only enable on Linux (known to work)
-				bindOpts += " defer-accept"
-			}
-
-			if lbAcceptProxy != 0 {
-				bindOpts += " accept-proxy"
-			}
-
-			serverOpts := ""
-
-			if manager.LocalHealthChecks {
-				serverOpts += " check"
-			}
-
-			if healthCheck.IntervalSeconds > 0 {
-				serverOpts += fmt.Sprintf(" inter %v", healthCheck.IntervalSeconds*1000)
-			}
-
-			switch lbProxyProtocol {
-			case 2:
-				serverOpts += " send-proxy-v2"
-			case 1:
-				serverOpts += " send-proxy"
-			case 0:
-				// ignore
-			default:
-				log.Printf("Invalid proxy-protocol given for %v: %v - ignoring.",
-					app.Id, app.Labels["lb-proxy-protocol"])
-			}
-
-			switch appProtocol {
-			case "http":
-				result += fmt.Sprintf(
-					"frontend __frontend_%v\n"+
-						"  bind %v:%v%v\n"+
-						"  option dontlognull\n"+
-						"  default_backend %v\n"+
-						"\n"+
-						"backend %v\n"+
-						"  mode http\n"+
-						"  balance leastconn\n"+
-						"  option httpchk GET %v HTTP/1.1\\r\\nHost:\\ %v\n",
-					appID, bindAddr, servicePort, bindOpts, appID, appID,
-					healthCheck.Path, "health-check")
-			case "redis-master", "redis-server", "redis":
-				result += fmt.Sprintf(
-					"listen %v\n"+
-						"  bind %v:%v%v\n"+
-						"  option dontlognull\n"+
-						"  mode tcp\n"+
-						"  balance leastconn\n"+
-						"  option tcp-check\n"+
-						"  tcp-check connect\n"+
-						"  tcp-check send PING\\r\\n\n"+
-						"  tcp-check expect string +PONG\n"+
-						"  tcp-check send info\\ replication\\r\\n\n"+
-						"  tcp-check expect string role:master\n"+
-						"  tcp-check send QUIT\\r\\n\n"+
-						"  tcp-check expect string +OK\n",
-					appID, bindAddr, servicePort, bindOpts)
-			case "smtp":
-				result += fmt.Sprintf(
-					"listen %v\n"+
-						"  bind %v:%v%v\n"+
-						"  option dontlognull\n"+
-						"  mode tcp\n"+
-						"  balance leastconn\n"+
-						"  option tcp-check\n"+
-						"  option smtpchk EHLO localhost\n",
-					appID, bindAddr, servicePort, bindOpts)
-			default:
-				result += fmt.Sprintf(
-					"listen %v\n"+
-						"  bind %v:%v%v\n"+
-						"  option dontlognull\n"+
-						"  mode tcp\n"+
-						"  balance leastconn\n",
-					appID, bindAddr, servicePort, bindOpts)
-			}
-
-			result += "  option redispatch\n"
-			result += "  retries 1\n"
-
-			for _, task := range sortTasks(app.Tasks, portIndex) {
-				result += fmt.Sprintf(
-					"  server %v:%v %v:%v%v\n",
-					task.Host, task.Ports[portIndex], // taskLabel == "$host:$port"
-					SoftResolveIPAddr(task.Host),
-					task.Ports[portIndex],
-					serverOpts)
-			}
-
-			result += "\n"
+	for portIndex, portDef := range app.PortDefinitions {
+		if manager.isGroupIncluded(portDef.Labels["lb-group"]) {
+			result += manager.makeConfigForPort(app, portIndex)
 		}
 	}
 
 	return result, nil
+}
+
+func (manager *HaproxyMgr) isGroupIncluded(groupName string) bool {
+	for _, filterGroup := range manager.FilterGroups {
+		if groupName == filterGroup || filterGroup == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) string {
+	if GetTransportProtocol(app, portIndex) != "tcp" {
+		return ""
+	}
+
+	var portDef = app.PortDefinitions[portIndex]
+	var servicePort = portDef.Port
+	var appID = PrettifyAppId(app.Id, portIndex, servicePort)
+	var bindAddr = manager.ServiceAddr
+	var healthCheck = GetHealthCheckForPortIndex(app.HealthChecks, portIndex)
+	var appProtocol = GetApplicationProtocol(app, portIndex)
+
+	var lbVirtualHost = portDef.Labels["lb-vhost"]
+	if len(lbVirtualHost) != 0 {
+		manager.vhosts[appID] = lbVirtualHost
+		if portDef.Labels["lb-vhost-default"] == "1" {
+			manager.vhostDefault = appID
+		}
+	} else {
+		delete(manager.vhosts, appID)
+		if manager.vhostDefault == appID {
+			manager.vhostDefault = ""
+		}
+	}
+
+	result := ""
+	bindOpts := ""
+
+	if runtime.GOOS == "linux" { // only enable on Linux (known to work)
+		bindOpts += " defer-accept"
+	}
+
+	if Atoi(portDef.Labels[LB_ACCEPT_PROXY], 0) != 0 {
+		bindOpts += " accept-proxy"
+	}
+
+	serverOpts := ""
+
+	if manager.LocalHealthChecks {
+		serverOpts += " check"
+	}
+
+	if healthCheck.IntervalSeconds > 0 {
+		serverOpts += fmt.Sprintf(" inter %v", healthCheck.IntervalSeconds*1000)
+	}
+
+	switch Atoi(portDef.Labels[LB_PROXY_PROTOCOL], 0) {
+	case 2:
+		serverOpts += " send-proxy-v2"
+	case 1:
+		serverOpts += " send-proxy"
+	case 0:
+		// ignore
+	default:
+		log.Printf("Invalid proxy-protocol given for %v: %v - ignoring.",
+			app.Id, app.Labels["lb-proxy-protocol"])
+	}
+
+	switch appProtocol {
+	case "http":
+		result += fmt.Sprintf(
+			"frontend __frontend_%v\n"+
+				"  bind %v:%v%v\n"+
+				"  option dontlognull\n"+
+				"  default_backend %v\n"+
+				"\n"+
+				"backend %v\n"+
+				"  mode http\n"+
+				"  balance leastconn\n"+
+				"  option httpchk GET %v HTTP/1.1\\r\\nHost:\\ %v\n",
+			appID, bindAddr, servicePort, bindOpts, appID, appID,
+			healthCheck.Path, "health-check")
+	case "redis-master", "redis-server", "redis":
+		result += fmt.Sprintf(
+			"listen %v\n"+
+				"  bind %v:%v%v\n"+
+				"  option dontlognull\n"+
+				"  mode tcp\n"+
+				"  balance leastconn\n"+
+				"  option tcp-check\n"+
+				"  tcp-check connect\n"+
+				"  tcp-check send PING\\r\\n\n"+
+				"  tcp-check expect string +PONG\n"+
+				"  tcp-check send info\\ replication\\r\\n\n"+
+				"  tcp-check expect string role:master\n"+
+				"  tcp-check send QUIT\\r\\n\n"+
+				"  tcp-check expect string +OK\n",
+			appID, bindAddr, servicePort, bindOpts)
+	case "smtp":
+		result += fmt.Sprintf(
+			"listen %v\n"+
+				"  bind %v:%v%v\n"+
+				"  option dontlognull\n"+
+				"  mode tcp\n"+
+				"  balance leastconn\n"+
+				"  option tcp-check\n"+
+				"  option smtpchk EHLO localhost\n",
+			appID, bindAddr, servicePort, bindOpts)
+	default:
+		result += fmt.Sprintf(
+			"listen %v\n"+
+				"  bind %v:%v%v\n"+
+				"  option dontlognull\n"+
+				"  mode tcp\n"+
+				"  balance leastconn\n",
+			appID, bindAddr, servicePort, bindOpts)
+	}
+
+	result += "  option redispatch\n"
+	result += "  retries 1\n"
+
+	for _, task := range sortTasks(app.Tasks, portIndex) {
+		result += fmt.Sprintf(
+			"  server %v:%v %v:%v%v\n",
+			task.Host, task.Ports[portIndex], // taskLabel == "$host:$port"
+			SoftResolveIPAddr(task.Host),
+			task.Ports[portIndex],
+			serverOpts)
+	}
+
+	result += "\n"
+
+	return result
 }
 
 func (manager *HaproxyMgr) writeConfig() error {
@@ -400,15 +446,46 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 			"\n",
 		manager.ManagementAddr, manager.ManagementPort)
 
-	gatewayHTTP := manager.makeGatewayHTTP()
-	gatewayHTTPS := manager.makeGatewayHTTPS()
-
-	return headerFragment + mgntFragment + gatewayHTTP + gatewayHTTPS, nil
+	if manager.GatewayEnabled {
+		gatewayHTTP := manager.makeGatewayHTTP()
+		gatewayHTTPS := manager.makeGatewayHTTPS()
+		return headerFragment + mgntFragment + gatewayHTTP + gatewayHTTPS, nil
+	} else {
+		return headerFragment + mgntFragment, nil
+	}
 }
 
 func (manager *HaproxyMgr) makeGatewayHTTP() string {
-	var fragment string
+	var (
+		suffixMatches []string
+		suffixRoutes  map[string]string = make(map[string]string)
+		exactMatches  []string
+		exactRoutes   map[string]string = make(map[string]string)
+		vhostDefault  string
+		port          uint = manager.GatewayPortHTTP
+	)
 
+	for appID, vhost := range manager.vhosts {
+		matchToken := "vhost_" + vhost
+		matchToken = strings.Replace(matchToken, ".", "_", -1)
+		matchToken = strings.Replace(matchToken, "*", "STAR", -1)
+
+		if len(vhost) >= 3 && vhost[0] == '*' && vhost[1] == '.' {
+			suffixMatches = append(suffixMatches,
+				fmt.Sprintf("  acl %v  hdr_dom(host) -i %v\n", matchToken, strings.SplitN(vhost, ".", 2)[1]))
+			suffixRoutes[matchToken] = appID
+		} else {
+			exactMatches = append(exactMatches,
+				fmt.Sprintf("  acl %v hdr(host) -i %v:%v\n", matchToken, vhost, port))
+			exactRoutes[matchToken] = appID
+		}
+
+		if manager.vhostDefault == appID {
+			vhostDefault = appID
+		}
+	}
+
+	var fragment string
 	fragment += fmt.Sprintf(
 		"frontend __gateway_http\n"+
 			"  bind %v:%v\n"+
@@ -417,9 +494,33 @@ func (manager *HaproxyMgr) makeGatewayHTTP() string {
 			"  reqadd X-Forwarded-Proto:\\ http\n"+
 			"\n",
 		manager.GatewayAddr,
-		manager.GatewayPortHTTP)
+		port)
 
-	// TODO
+	for _, exactMatch := range exactMatches {
+		fragment += exactMatch
+	}
+
+	for _, suffixMatch := range suffixMatches {
+		fragment += suffixMatch
+	}
+
+	if len(exactMatches) != 0 || len(suffixMatches) != 0 {
+		fragment += "\n"
+	}
+
+	for acl, appID := range exactRoutes {
+		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
+	}
+
+	for acl, appID := range suffixRoutes {
+		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
+	}
+
+	fragment += "\n"
+
+	if len(vhostDefault) != 0 {
+		fragment += fmt.Sprintf("  default_backend %v\n\n", vhostDefault)
+	}
 
 	return fragment
 }
