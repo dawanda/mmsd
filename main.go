@@ -94,6 +94,7 @@ type mmsdService struct {
 	UDPEnabled bool
 
 	// DNS service discovery
+	DnsEnabled  bool
 	DnsPort     uint
 	DnsBaseName string
 	DnsTTL      time.Duration
@@ -470,6 +471,7 @@ func (mmsd *mmsdService) Run() {
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceAddr, "haproxy-bind", mmsd.ServiceAddr, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
+	flag.BoolVar(&mmsd.DnsEnabled, "enable-dns", mmsd.DnsEnabled, "Enables DNS-based service discovery")
 	flag.UintVar(&mmsd.DnsPort, "dns-port", mmsd.DnsPort, "DNS service discovery port")
 	flag.BoolVar(&mmsd.DnsPushSRV, "dns-push-srv", mmsd.DnsPushSRV, "DNS service discovery to also push SRV on A")
 	flag.StringVar(&mmsd.DnsBaseName, "dns-basename", mmsd.DnsBaseName, "DNS service discovery's base name")
@@ -506,21 +508,27 @@ func (mmsd *mmsdService) setupManagedIP() {
 }
 
 func (mmsd *mmsdService) setupHandlers() {
-	mmsd.Handlers = []mmsdHandler{
-		&DnsManager{
+	if mmsd.DnsEnabled {
+		mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
 			Verbose:     mmsd.Verbose,
 			ServiceAddr: mmsd.ServiceAddr,
 			ServicePort: mmsd.DnsPort,
 			PushSRV:     mmsd.DnsPushSRV,
 			BaseName:    mmsd.DnsBaseName,
 			DnsTTL:      mmsd.DnsTTL,
-		},
-		NewUdpManager(
+		})
+	}
+
+	if mmsd.UDPEnabled {
+		mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(
 			mmsd.ServiceAddr,
 			mmsd.Verbose,
 			mmsd.UDPEnabled,
-		),
-		&HaproxyMgr{
+		))
+	}
+
+	if mmsd.TCPEnabled {
+		mmsd.Handlers = append(mmsd.Handlers, &HaproxyMgr{
 			Enabled:           mmsd.TCPEnabled,
 			Verbose:           mmsd.Verbose,
 			LocalHealthChecks: mmsd.LocalHealthChecks,
@@ -538,12 +546,15 @@ func (mmsd *mmsdService) setupHandlers() {
 			AdminSockPath:     filepath.Join(mmsd.RunStateDir, "haproxy.sock"),
 			ManagementAddr:    mmsd.ManagementAddr,
 			ManagementPort:    mmsd.HaproxyPort,
-		},
-		&FilesManager{
+		})
+	}
+
+	if mmsd.FilesEnabled {
+		mmsd.Handlers = append(mmsd.Handlers, &FilesManager{
 			Enabled:  mmsd.FilesEnabled,
 			Verbose:  mmsd.Verbose,
 			BasePath: mmsd.RunStateDir + "/confd",
-		},
+		})
 	}
 
 	for _, handler := range mmsd.Handlers {
@@ -593,6 +604,7 @@ func main() {
 		ServiceAddr:       net.ParseIP("0.0.0.0"),
 		HttpApiPort:       8082,
 		Verbose:           false,
+		DnsEnabled:        false,
 		DnsPort:           53,
 		DnsPushSRV:        false,
 		DnsBaseName:       "mmsd.",
