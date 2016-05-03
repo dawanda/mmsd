@@ -33,7 +33,8 @@ type DnsManager struct {
 	BaseName    string
 	DnsTTL      time.Duration
 	PushSRV     bool
-	server      *dns.Server
+	udpServer   *dns.Server
+	tcpServer   *dns.Server
 	db          map[string]*appEntry
 	dbMutex     sync.Mutex
 }
@@ -46,23 +47,36 @@ type appEntry struct {
 func (manager *DnsManager) Setup() error {
 	dns.HandleFunc(manager.BaseName, manager.dnsHandler)
 
-	manager.server = &dns.Server{
-		Addr:       fmt.Sprintf("%v:%v", manager.ServiceAddr, manager.ServicePort),
-		Net:        "udp",
-		TsigSecret: nil,
-	}
-
 	go func() {
-		err := manager.server.ListenAndServe()
+		manager.udpServer = &dns.Server{
+			Addr:       fmt.Sprintf("%v:%v", manager.ServiceAddr, manager.ServicePort),
+			Net:        "udp",
+			TsigSecret: nil,
+		}
+		err := manager.udpServer.ListenAndServe()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
+
+	go func() {
+		manager.tcpServer = &dns.Server{
+			Addr:       fmt.Sprintf("%v:%v", manager.ServiceAddr, manager.ServicePort),
+			Net:        "tcp",
+			TsigSecret: nil,
+		}
+		err := manager.tcpServer.ListenAndServe()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
 	return nil
 }
 
 func (manager *DnsManager) Shutdown() {
-	manager.server.Shutdown()
+	manager.udpServer.Shutdown()
+	manager.tcpServer.Shutdown()
 }
 
 func (manager *DnsManager) Log(msg string) {
