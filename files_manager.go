@@ -23,6 +23,10 @@ func (upstream *FilesManager) Log(msg string) {
 	}
 }
 
+func (manager *FilesManager) Setup() error {
+	return nil
+}
+
 func (manager *FilesManager) IsEnabled() bool {
 	return manager.Enabled
 }

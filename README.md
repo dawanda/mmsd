@@ -12,6 +12,7 @@
 - filter apps to be exposed by load balancer (or service files) via labels
   from marathon app definitions.
 - first-class docker support.
+- DNS based service discovery (supports `A` and `SRV` query types).
 - TODO: provide simple rc scripts to run this agent (openrc/upstart/systemd)
 
 ### Start me Up

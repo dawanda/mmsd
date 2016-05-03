@@ -47,11 +47,10 @@ import (
 )
 
 type mmsdHandler interface {
+	Setup() error
 	Apply(apps []*marathon.App, force bool) error
 	Update(app *marathon.App, taskID string) error
 	Remove(appID string, taskID string, app *marathon.App) error
-	IsEnabled() bool
-	SetEnabled(value bool)
 }
 
 type mmsdService struct {
@@ -93,6 +92,11 @@ type mmsdService struct {
 
 	// udp load balancing
 	UDPEnabled bool
+
+	// DNS service discovery
+	DnsPort     uint
+	DnsBaseName string
+	DnsTTL      time.Duration
 }
 
 func (mmsd *mmsdService) setupHttpService() {
@@ -400,22 +404,18 @@ func (mmsd *mmsdService) Update(appID string, taskID string, alive bool) {
 	}
 
 	for _, handler := range mmsd.Handlers {
-		if handler.IsEnabled() {
-			err = handler.Update(app, taskID)
-			if err != nil {
-				log.Printf("Update failed. %v\n", err)
-			}
+		err = handler.Update(app, taskID)
+		if err != nil {
+			log.Printf("Update failed. %v\n", err)
 		}
 	}
 }
 
 func (mmsd *mmsdService) Remove(appID string, taskID string, app *marathon.App) {
 	for _, handler := range mmsd.Handlers {
-		if handler.IsEnabled() {
-			err := handler.Remove(appID, taskID, app)
-			if err != nil {
-				log.Printf("Remove failed. %v\n", err)
-			}
+		err := handler.Remove(appID, taskID, app)
+		if err != nil {
+			log.Printf("Remove failed. %v\n", err)
 		}
 	}
 }
@@ -432,11 +432,9 @@ func (mmsd *mmsdService) MaybeResetFromTasks(force bool) error {
 	}
 
 	for _, handler := range mmsd.Handlers {
-		if handler.IsEnabled() {
-			err = handler.Apply(apps, force)
-			if err != nil {
-				log.Printf("Failed to apply changes to handler. %v\n", err)
-			}
+		err = handler.Apply(apps, force)
+		if err != nil {
+			log.Printf("Failed to apply changes to handler. %v\n", err)
 		}
 	}
 
@@ -471,6 +469,9 @@ func (mmsd *mmsdService) Run() {
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceAddr, "haproxy-bind", mmsd.ServiceAddr, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
+	flag.UintVar(&mmsd.DnsPort, "dns-port", mmsd.DnsPort, "DNS service discovery port")
+	flag.StringVar(&mmsd.DnsBaseName, "dns-basename", mmsd.DnsBaseName, "DNS service discovery's base name")
+	flag.DurationVar(&mmsd.DnsTTL, "dns-ttl", mmsd.DnsTTL, "DNS service discovery's reply message TTL")
 	showVersionAndExit := flag.BoolP("version", "V", false, "Shows version and exits")
 
 	flag.Usage = func() {
@@ -504,6 +505,13 @@ func (mmsd *mmsdService) setupManagedIP() {
 
 func (mmsd *mmsdService) setupHandlers() {
 	mmsd.Handlers = []mmsdHandler{
+		&DnsManager{
+			Verbose:     mmsd.Verbose,
+			ServiceAddr: mmsd.ServiceAddr,
+			ServicePort: mmsd.DnsPort,
+			DnsBaseName: mmsd.DnsBaseName,
+			DnsTTL:      mmsd.DnsTTL,
+		},
 		NewUdpManager(
 			mmsd.ServiceAddr,
 			mmsd.Verbose,
@@ -533,6 +541,13 @@ func (mmsd *mmsdService) setupHandlers() {
 			Verbose:  mmsd.Verbose,
 			BasePath: mmsd.RunStateDir + "/confd",
 		},
+	}
+
+	for _, handler := range mmsd.Handlers {
+		err := handler.Setup()
+		if err != nil {
+			log.Fatalf("Failed to setup handlers. %v\n", err)
+		}
 	}
 
 	// trigger initial run
@@ -575,6 +590,9 @@ func main() {
 		ServiceAddr:       net.ParseIP("0.0.0.0"),
 		HttpApiPort:       8082,
 		Verbose:           false,
+		DnsPort:           53,
+		DnsBaseName:       "mmsd.",
+		DnsTTL:            time.Second * 5,
 		quitChannel:       make(chan bool),
 	}
 

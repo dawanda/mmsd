@@ -26,6 +26,10 @@ func NewUdpManager(bindAddr net.IP, verbose bool, enabled bool) *UdpManager {
 	}
 }
 
+func (manager *UdpManager) Setup() error {
+	return nil
+}
+
 func (manager *UdpManager) IsEnabled() bool {
 	return manager.Enabled
 }

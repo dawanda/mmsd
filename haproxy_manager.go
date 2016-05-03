@@ -62,6 +62,10 @@ var (
 	ErrBadExit = errors.New("Bad Process Exit.")
 )
 
+func (manager *HaproxyMgr) Setup() error {
+	return nil
+}
+
 func (manager *HaproxyMgr) IsEnabled() bool {
 	return manager.Enabled
 }
