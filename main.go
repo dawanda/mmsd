@@ -97,6 +97,7 @@ type mmsdService struct {
 	DnsPort     uint
 	DnsBaseName string
 	DnsTTL      time.Duration
+	DnsPushSRV  bool
 }
 
 func (mmsd *mmsdService) setupHttpService() {
@@ -470,6 +471,7 @@ func (mmsd *mmsdService) Run() {
 	flag.IPVar(&mmsd.ServiceAddr, "haproxy-bind", mmsd.ServiceAddr, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
 	flag.UintVar(&mmsd.DnsPort, "dns-port", mmsd.DnsPort, "DNS service discovery port")
+	flag.BoolVar(&mmsd.DnsPushSRV, "dns-push-srv", mmsd.DnsPushSRV, "DNS service discovery to also push SRV on A")
 	flag.StringVar(&mmsd.DnsBaseName, "dns-basename", mmsd.DnsBaseName, "DNS service discovery's base name")
 	flag.DurationVar(&mmsd.DnsTTL, "dns-ttl", mmsd.DnsTTL, "DNS service discovery's reply message TTL")
 	showVersionAndExit := flag.BoolP("version", "V", false, "Shows version and exits")
@@ -509,7 +511,8 @@ func (mmsd *mmsdService) setupHandlers() {
 			Verbose:     mmsd.Verbose,
 			ServiceAddr: mmsd.ServiceAddr,
 			ServicePort: mmsd.DnsPort,
-			DnsBaseName: mmsd.DnsBaseName,
+			PushSRV:     mmsd.DnsPushSRV,
+			BaseName:    mmsd.DnsBaseName,
 			DnsTTL:      mmsd.DnsTTL,
 		},
 		NewUdpManager(
@@ -591,6 +594,7 @@ func main() {
 		HttpApiPort:       8082,
 		Verbose:           false,
 		DnsPort:           53,
+		DnsPushSRV:        false,
 		DnsBaseName:       "mmsd.",
 		DnsTTL:            time.Second * 5,
 		quitChannel:       make(chan bool),

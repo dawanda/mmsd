@@ -26,24 +26,25 @@ import (
 	"github.com/miekg/dns"
 )
 
-type appEntry struct {
-	ipAddresses []net.IP
-	app         *marathon.App
-}
-
 type DnsManager struct {
 	Verbose     bool
 	ServiceAddr net.IP
 	ServicePort uint
-	DnsBaseName string
+	BaseName    string
 	DnsTTL      time.Duration
+	PushSRV     bool
 	server      *dns.Server
 	db          map[string]*appEntry
 	dbMutex     sync.Mutex
 }
 
+type appEntry struct {
+	ipAddresses []net.IP
+	app         *marathon.App
+}
+
 func (manager *DnsManager) Setup() error {
-	dns.HandleFunc(manager.DnsBaseName, manager.dnsHandler)
+	dns.HandleFunc(manager.BaseName, manager.dnsHandler)
 
 	manager.server = &dns.Server{
 		Addr:       fmt.Sprintf("%v:%v", manager.ServiceAddr, manager.ServicePort),
@@ -138,7 +139,7 @@ func (manager *DnsManager) dnsHandler(w dns.ResponseWriter, req *dns.Msg) {
 	m.SetReply(req)
 
 	name := req.Question[0].Name
-	name = strings.TrimSuffix(name, "."+manager.DnsBaseName)
+	name = strings.TrimSuffix(name, "."+manager.BaseName)
 
 	manager.dbMutex.Lock()
 	entry, ok := manager.db[name]
@@ -146,41 +147,58 @@ func (manager *DnsManager) dnsHandler(w dns.ResponseWriter, req *dns.Msg) {
 
 	if ok {
 		switch req.Question[0].Qtype {
-		case dns.TypeTXT:
-			// p0,p1,p2:p0,p1,p2
 		case dns.TypeSRV:
-			for _, task := range entry.app.Tasks {
-				for _, port := range task.Ports {
-					rr := &dns.SRV{
-						Hdr: dns.RR_Header{
-							Ttl:    uint32(manager.DnsTTL.Seconds()),
-							Name:   manager.DnsBaseName,
-							Class:  dns.ClassINET,
-							Rrtype: req.Question[0].Qtype,
-						},
-						Port:     uint16(port),
-						Target:   task.Host + ".",
-						Weight:   1,
-						Priority: 1,
-					}
-					m.Answer = append(m.Answer, rr)
-				}
-			}
+			m.Answer = manager.makeAllSRV(entry)
 		case dns.TypeA:
-			for _, ip := range entry.ipAddresses {
-				rr := &dns.A{
-					Hdr: dns.RR_Header{
-						Ttl:    uint32(manager.DnsTTL.Seconds()),
-						Name:   manager.DnsBaseName,
-						Class:  dns.ClassINET,
-						Rrtype: req.Question[0].Qtype,
-					},
-					A: ip.To4(),
-				}
-				m.Answer = append(m.Answer, rr)
+			m.Answer = manager.makeAllA(entry)
+			if manager.PushSRV {
+				m.Extra = manager.makeAllSRV(entry)
 			}
 		}
 	}
 
 	w.WriteMsg(m)
+}
+
+func (manager *DnsManager) makeAllA(entry *appEntry) []dns.RR {
+	var result []dns.RR
+
+	for _, ip := range entry.ipAddresses {
+		rr := &dns.A{
+			Hdr: dns.RR_Header{
+				Ttl:    uint32(manager.DnsTTL.Seconds()),
+				Name:   manager.BaseName,
+				Class:  dns.ClassINET,
+				Rrtype: dns.TypeA,
+			},
+			A: ip.To4(),
+		}
+		result = append(result, rr)
+	}
+
+	return result
+}
+
+func (manager *DnsManager) makeAllSRV(entry *appEntry) []dns.RR {
+	var result []dns.RR
+
+	for _, task := range entry.app.Tasks {
+		for _, port := range task.Ports {
+			rr := &dns.SRV{
+				Hdr: dns.RR_Header{
+					Ttl:    uint32(manager.DnsTTL.Seconds()),
+					Name:   manager.BaseName,
+					Class:  dns.ClassINET,
+					Rrtype: dns.TypeSRV,
+				},
+				Port:     uint16(port),
+				Target:   task.Host + ".",
+				Weight:   1,
+				Priority: 1,
+			}
+			result = append(result, rr)
+		}
+	}
+
+	return result
 }
