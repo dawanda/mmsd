@@ -15,6 +15,10 @@
 			"Rev": "c9e326e2bdec29039a3761c07bece13133863e1e"
 		},
 		{
+			"ImportPath": "github.com/miekg/dns",
+			"Rev": "905106d0e8908efdda8d4519c817622c7e8ee8ec"
+		},
+		{
 			"ImportPath": "github.com/ogier/pflag",
 			"Comment": "v0.0.1-7-g45c278a",
 			"Rev": "45c278ab3607870051a2ea9040bb85fcb8557481"
