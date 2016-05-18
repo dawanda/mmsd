@@ -1,9 +1,10 @@
-FROM ruby:2.2.4
+FROM golang:1.6.2-alpine
 MAINTAINER Christian Parpart <christian@dawanda.com>
 
-RUN gem install em-eventsource
-RUN apt-get update && apt-get install -y haproxy
+RUN apk --update add git haproxy && go get github.com/tools/godep
 
-ADD mmsd /mmsd
+ADD . /go/src/github.com/dawanda/mmsd
+RUN cd /go/src/github.com/dawanda/mmsd && godep restore && go install
 
-ENTRYPOINT ["/mmsd"]
+ENTRYPOINT ["/go/bin/mmsd"]
+CMD ["--help"]
