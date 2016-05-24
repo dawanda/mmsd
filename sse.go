@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -86,8 +87,11 @@ func (sse *EventSource) Run() {
 
 	var client = &http.Client{tr, nil, nil, 0 * time.Second}
 	req, err := http.NewRequest("GET", sse.Url, nil)
-	if err != nil && sse.OnError != nil {
-		sse.OnError("error", err.Error())
+	if err != nil {
+		if sse.OnError != nil {
+			sse.OnError("error", err.Error())
+		}
+		return
 	}
 
 	req.Header.Add("Accept", "text/event-stream")
@@ -102,6 +106,14 @@ func (sse *EventSource) Run() {
 	}
 
 	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		err := fmt.Errorf("SSE: unexpected response status code: %v\n", resp.StatusCode)
+		if sse.OnError != nil {
+			sse.OnError("error", err.Error())
+		}
+		return
+	}
 
 	if sse.OnOpen != nil {
 		sse.OnOpen("open", "Connected.")
@@ -120,7 +132,7 @@ func (sse *EventSource) Run() {
 			if sse.OnError != nil {
 				sse.OnError("error", err.Error())
 			}
-			break
+			return
 		}
 
 		line = strings.Trim(line, "\n\r")

@@ -425,12 +425,12 @@ func (mmsd *mmsdService) Remove(appID string, taskID string, app *marathon.App) 
 func (mmsd *mmsdService) MaybeResetFromTasks(force bool) error {
 	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
 	if err != nil {
-		return err
+		return fmt.Errorf("Could not create new marathon service. %v", err)
 	}
 
 	apps, err := m.GetApps()
 	if err != nil {
-		return err
+		return fmt.Errorf("Could not get apps. %v", err)
 	}
 
 	for _, handler := range mmsd.Handlers {

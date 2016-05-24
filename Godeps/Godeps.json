@@ -4,7 +4,7 @@
 	"Deps": [
 		{
 			"ImportPath": "github.com/christianparpart/go-marathon/marathon",
-			"Rev": "18456db75ba183499fffdee4afb90ff082e2bc33"
+			"Rev": "356567ba325fa11b14dafd750c75f29bc35ab879"
 		},
 		{
 			"ImportPath": "github.com/gorilla/context",
