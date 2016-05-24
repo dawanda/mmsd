@@ -34,7 +34,7 @@ docker run --net=host -d --name mmsd mmsd \
 ### Usage
 
 ```
-mmsd - Mesos Marathon Service Discovery, version 0.1.0, licensed under MIT
+mmsd - Mesos Marathon Service Discovery, version 0.9.3, licensed under MIT
 Written by Christian Parpart <christian@dawanda.com>
 
 Usage: mmsd [flags ...]
