@@ -34,36 +34,62 @@ docker run --net=host -d --name mmsd mmsd \
 ### Usage
 
 ```
-mmsd [options]
+mmsd - Mesos Marathon Service Discovery, version 0.1.0, licensed under MIT
+Written by Christian Parpart <christian@dawanda.com>
 
-  --marathon-host=IP        Marathon IP
-  --marathon-port=PORT      Marathon Port
-  --filter-groups=LIST      Comma seperated list of service groups to expose [*].
-  --haproxy-bin=PATH        Path to haproxy binary [/usr/bin/haproxy]
-  --haproxy-pidfile=PATH    Path to haproxy PID file [/var/run/haproxy.pid]
-  --haproxy-cfg=PATH        Path to haproxy.cfg [/var/run/haproxy.cfg]
-  --haproxy-tail=PATH       Path to haproxy config tail [].
-  --haproxy-bind=IP         Default IP bind [0.0.0.0]
-  --haproxy-port=PORT       haproxy TCP port to the management interface.
-  --enable-gateway          Enables HTTP(S) gateway. Disabled by default.
-  --gateway-http-port=PORT  HTTP gateway port, enables HTTP gateway on given
-                            port to proxy incoming HTTP requests to the
-                            application by its HTTP request host header.
-  --gateway-https-port=PORT HTTPS gateway port, enables HTTPS gateway on given 
-                            port to proxy incoming HTTP requests to the
-                            application by its HTTP request host header.
-  --upstream-confd=PATH     Path to runtime state dir containing
-                            a file for each Marathon application with a
-                            simple list of hostname:port pairs per line.
-  --managed-ip=IPv4:IPv4    IP to manage via iptables NAT rules to point
-                            to this service. First IP is the service IP,
-                            whereas the second is the hosts IP.
-  --log-level=LEVEL         one of debug, info, warn, error, fatal [info]
+Usage: mmsd [flags ...]
 
-Every command-line parameter can be also specified as environment variable,
-however, the command line argument takes precedence.
-Environment variables are upper case, without leading dashes, and mid-dashes
-represented as underscores.
+  --dns-basename string
+        DNS service discovery's base name (default "mmsd.")
+  --dns-port uint
+        DNS service discovery port (default 53)
+  --dns-push-srv
+        DNS service discovery to also push SRV on A
+  --dns-ttl duration
+        DNS service discovery's reply message TTL (default 5s)
+  --enable-dns
+        Enables DNS-based service discovery
+  --enable-files
+        enables file based service discovery (default true)
+  --enable-gateway
+        Enables gateway support
+  --enable-health-checks
+        Enable local health checks (if available) instead of relying on Marathon
+        health checks alone. (default true)
+  --enable-tcp
+        enables haproxy TCP load balancing (default true)
+  --enable-udp
+        enables UDP load balancing (default true)
+  --filter-groups string
+        Application group filter (default "*")
+  --gateway-bind value
+        gateway bind address (default 0.0.0.0)
+  --gateway-port-http uint
+        gateway port for HTTP (default 80)
+  --gateway-port-https uint
+        gateway port for HTTPS (default 443)
+  --haproxy-bin string
+        path to haproxy binary (default "/usr/local/bin/haproxy")
+  --haproxy-bind value
+        haproxy management port (default 0.0.0.0)
+  --haproxy-cfgtail string
+        path to haproxy tail config file (default "/etc/mmsd/haproxy-tail.cfg")
+  --haproxy-port uint
+        haproxy management port (default 8081)
+  --managed-ip value
+        IP-address to manage for mmsd (default <nil>)
+  --marathon-ip value
+        Marathon endpoint TCP IP address (default 127.0.0.1)
+  --marathon-port uint
+        Marathon endpoint TCP port number (default 8080)
+  --reconnect-delay duration
+        Marathon reconnect delay (default 4s)
+  --run-state-dir string
+        Path to directory to keep run-state (default "/var/run/mmsd")
+  -v, --verbose
+        Set verbosity level
+  -V, --version
+        Shows version and exits
 ```
 
 ### Upstream Config Files
