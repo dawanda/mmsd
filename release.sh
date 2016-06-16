@@ -39,4 +39,4 @@ sed -i -e 's/\(const appVersion = \)".*"$/\1"'${PV}'"/' main.go
 
 git ci main.go -m "release $PV"
 git tag $PV
-git push
+git push --tags
