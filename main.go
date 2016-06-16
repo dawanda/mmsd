@@ -337,7 +337,7 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 		if len(app.HealthChecks) == 0 {
 			mmsd.Update(event.AppId, event.TaskId, true)
 		}
-	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
+	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilling, marathon.TaskKilled, marathon.TaskLost:
 		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
 		app, err := mmsd.getMarathonApp(event.AppId)
 		if err != nil {
