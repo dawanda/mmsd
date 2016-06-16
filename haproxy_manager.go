@@ -668,20 +668,16 @@ func (manager *HaproxyMgr) reloadProcess(pid int) error {
 func (manager *HaproxyMgr) exec(logMessage string, args ...string) error {
 	proc := exec.Command(manager.Executable, args...)
 	output, err := proc.CombinedOutput()
-	logStarted := false
+
+	log.Printf("[haproxy] %v: %v %v\n", logMessage, manager.Executable, args)
 
 	exitCode := proc.ProcessState.Sys().(syscall.WaitStatus)
 	if exitCode != 0 {
-		log.Printf("[haproxy] %v: %v %v\n", logMessage, manager.Executable, args)
-		logStarted = true
 		log.Printf("[haproxy] Bad exit code %v.\n", exitCode)
 		err = ErrBadExit
 	}
 
-	if exitCode != 0 || (manager.Verbose && len(output) != 0) {
-		if !logStarted {
-			log.Printf("[haproxy] %v: %v %v\n", logMessage, manager.Executable, args)
-		}
+	if len(output) != 0 && manager.Verbose {
 		log.Println("[haproxy] command output:")
 		log.Println(strings.TrimSpace(string(output)))
 	}
