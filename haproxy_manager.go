@@ -189,7 +189,8 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 	if task != nil && task.IsAlive() {
 		// no health checks defined or app got just spawned the first time?
 		if len(app.HealthChecks) == 0 || isAppJustSpawned(app) {
-			log.Printf("[haproxy] nodes becomes healthy (or alive) first time. force reload config.\n")
+			log.Printf("[haproxy] App %v on host %v becomes healthy (or alive) first time. force reload config.\n",
+				app.Id, task.Host)
 			return manager.reloadConfig(true)
 		}
 	}
