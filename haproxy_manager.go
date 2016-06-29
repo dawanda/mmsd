@@ -503,7 +503,7 @@ func (manager *HaproxyMgr) makeGatewayHTTP() string {
 			suffixRoutes[matchToken] = appID
 		} else {
 			exactMatches = append(exactMatches,
-				fmt.Sprintf("  acl %v hdr(host) -i %v:%v\n", matchToken, vhost, port))
+				fmt.Sprintf("  acl %v hdr(host) -i %v\n", matchToken, vhost))
 			exactRoutes[matchToken] = appID
 		}
 
