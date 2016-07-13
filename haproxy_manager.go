@@ -43,9 +43,9 @@ type HaproxyMgr struct {
 	appConfigFragments map[string]string                    // [appId] = haproxy_config_fragment
 	appLabels          map[string]map[string]string         // [appId][key] = value
 	appStateCache      map[string]map[string]*marathon.Task // [appId][task] = Task
-	vhosts             map[string]string                    // [appId] = vhost
+	vhosts             map[string][]string                  // [appId] = []vhost
 	vhostDefault       string
-	vhostsHTTPS        map[string]string
+	vhostsHTTPS        map[string][]string
 	vhostDefaultHTTPS  string
 }
 
@@ -61,6 +61,14 @@ const (
 var (
 	ErrBadExit = errors.New("Bad Process Exit.")
 )
+
+func makeStringArray(s string) []string {
+  if len(s) == 0 {
+    return []string{}
+  } else {
+    return strings.Split(s, ",")
+  }
+}
 
 func (manager *HaproxyMgr) Setup() error {
 	return nil
@@ -80,10 +88,10 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 	manager.appConfigFragments = make(map[string]string)
 	manager.clearAppStateCache()
 
-	manager.vhosts = make(map[string]string)
+	manager.vhosts = make(map[string][]string)
 	manager.vhostDefault = ""
 
-	manager.vhostsHTTPS = make(map[string]string)
+	manager.vhostsHTTPS = make(map[string][]string)
 	manager.vhostDefaultHTTPS = ""
 
 	for _, app := range apps {
@@ -279,9 +287,9 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 	var healthCheck = GetHealthCheckForPortIndex(app.HealthChecks, portIndex)
 	var appProtocol = GetApplicationProtocol(app, portIndex)
 
-	var lbVirtualHost = portDef.Labels[LB_VHOST_HTTP]
-	if len(lbVirtualHost) != 0 {
-		manager.vhosts[appID] = lbVirtualHost
+	var lbVirtualHosts = makeStringArray(portDef.Labels[LB_VHOST_HTTP])
+	if len(lbVirtualHosts) != 0 {
+		manager.vhosts[appID] = lbVirtualHosts
 		if portDef.Labels[LB_VHOST_DEFAULT_HTTP] == "1" {
 			manager.vhostDefault = appID
 		}
@@ -292,9 +300,9 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 		}
 	}
 
-	lbVirtualHost = portDef.Labels[LB_VHOST_HTTPS]
-	if len(lbVirtualHost) != 0 {
-		manager.vhostsHTTPS[appID] = lbVirtualHost
+	lbVirtualHosts = makeStringArray(portDef.Labels[LB_VHOST_HTTPS])
+	if len(lbVirtualHosts) != 0 {
+		manager.vhostsHTTPS[appID] = lbVirtualHosts
 		if portDef.Labels[LB_VHOST_DEFAULT_HTTPS] == "1" {
 			manager.vhostDefaultHTTPS = appID
 		}
@@ -492,23 +500,26 @@ func (manager *HaproxyMgr) makeGatewayHTTP() string {
 		port          uint = manager.GatewayPortHTTP
 	)
 
-	for appID, vhost := range manager.vhosts {
-		matchToken := "vhost_" + vhost
-		matchToken = strings.Replace(matchToken, ".", "_", -1)
-		matchToken = strings.Replace(matchToken, "*", "STAR", -1)
+	for appID, vhosts := range manager.vhosts {
+		for _i, vhost := range vhosts {
+			log.Printf("[haproxy] appID:%v, vhost:%v, i:%v\n", appID, vhost, _i)
+			matchToken := "vhost_" + vhost
+			matchToken = strings.Replace(matchToken, ".", "_", -1)
+			matchToken = strings.Replace(matchToken, "*", "STAR", -1)
 
-		if len(vhost) >= 3 && vhost[0] == '*' && vhost[1] == '.' {
-			suffixMatches = append(suffixMatches,
-				fmt.Sprintf("  acl %v  hdr_dom(host) -i %v\n", matchToken, strings.SplitN(vhost, ".", 2)[1]))
-			suffixRoutes[matchToken] = appID
-		} else {
-			exactMatches = append(exactMatches,
-				fmt.Sprintf("  acl %v hdr(host) -i %v\n", matchToken, vhost))
-			exactRoutes[matchToken] = appID
-		}
+			if len(vhost) >= 3 && vhost[0] == '*' && vhost[1] == '.' {
+				suffixMatches = append(suffixMatches,
+					fmt.Sprintf("	acl %v	hdr_dom(host) -i %v\n", matchToken, strings.SplitN(vhost, ".", 2)[1]))
+				suffixRoutes[matchToken] = appID
+			} else {
+				exactMatches = append(exactMatches,
+					fmt.Sprintf("	acl %v hdr(host) -i %v\n", matchToken, vhost))
+				exactRoutes[matchToken] = appID
+			}
 
-		if manager.vhostDefault == appID {
-			vhostDefault = appID
+			if manager.vhostDefault == appID {
+				vhostDefault = appID
+			}
 		}
 	}
 
@@ -558,24 +569,26 @@ func (manager *HaproxyMgr) makeGatewayHTTPS() string {
 		port          uint = manager.GatewayPortHTTPS
 	)
 
-	for appID, vhost := range manager.vhostsHTTPS {
-		matchToken := "vhost_ssl_" + vhost
-		matchToken = strings.Replace(matchToken, ".", "_", -1)
-		matchToken = strings.Replace(matchToken, "*", "STAR", -1)
+	for appID, vhosts := range manager.vhostsHTTPS {
+    for _, vhost := range vhosts {
+      matchToken := "vhost_ssl_" + vhost
+      matchToken = strings.Replace(matchToken, ".", "_", -1)
+      matchToken = strings.Replace(matchToken, "*", "STAR", -1)
 
-		if len(vhost) >= 3 && vhost[0] == '*' && vhost[1] == '.' {
-			suffixMatches = append(suffixMatches,
-				fmt.Sprintf("  acl %v req_ssl_sni -m dom %v\n", matchToken, strings.SplitN(vhost, ".", 2)[1]))
-			suffixRoutes[matchToken] = appID
-		} else {
-			exactMatches = append(exactMatches,
-				fmt.Sprintf("  acl %v req_ssl_sni -i %v\n", matchToken, vhost))
-			exactRoutes[matchToken] = appID
-		}
+      if len(vhost) >= 3 && vhost[0] == '*' && vhost[1] == '.' {
+        suffixMatches = append(suffixMatches,
+          fmt.Sprintf("  acl %v req_ssl_sni -m dom %v\n", matchToken, strings.SplitN(vhost, ".", 2)[1]))
+        suffixRoutes[matchToken] = appID
+      } else {
+        exactMatches = append(exactMatches,
+          fmt.Sprintf("  acl %v req_ssl_sni -i %v\n", matchToken, vhost))
+        exactRoutes[matchToken] = appID
+      }
 
-		if manager.vhostDefaultHTTPS == appID {
-			vhostDefault = appID
-		}
+      if manager.vhostDefaultHTTPS == appID {
+        vhostDefault = appID
+      }
+    }
 	}
 
 	var fragment string
