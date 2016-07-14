@@ -531,6 +531,10 @@ func (manager *HaproxyMgr) makeGatewayHTTP() string {
 		"frontend __gateway_http\n"+
 			"  bind %v:%v\n"+
 			"  mode http\n"+
+			"  option dontlognull\n"+
+			"  option forwardfor\n"+
+			"  option httpclose\n"+
+			"  option abortonclose\n"+
 			"  option http-server-close\n"+
 			"  reqadd X-Forwarded-Proto:\\ http\n"+
 			"\n",
