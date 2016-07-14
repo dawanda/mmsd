@@ -352,6 +352,9 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 			"frontend __frontend_%v\n"+
 				"  bind %v:%v%v\n"+
 				"  option dontlognull\n"+
+				"  option forwardfor\n"+
+				"  option httpclose\n"+
+				"  option abortonclose\n"+
 				"  default_backend %v\n"+
 				"\n"+
 				"backend %v\n"+
