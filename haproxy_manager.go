@@ -63,11 +63,11 @@ var (
 )
 
 func makeStringArray(s string) []string {
-  if len(s) == 0 {
-    return []string{}
-  } else {
-    return strings.Split(s, ",")
-  }
+	if len(s) == 0 {
+		return []string{}
+	} else {
+		return strings.Split(s, ",")
+	}
 }
 
 func (manager *HaproxyMgr) Setup() error {
@@ -570,25 +570,25 @@ func (manager *HaproxyMgr) makeGatewayHTTPS() string {
 	)
 
 	for appID, vhosts := range manager.vhostsHTTPS {
-    for _, vhost := range vhosts {
-      matchToken := "vhost_ssl_" + vhost
-      matchToken = strings.Replace(matchToken, ".", "_", -1)
-      matchToken = strings.Replace(matchToken, "*", "STAR", -1)
+		for _, vhost := range vhosts {
+			matchToken := "vhost_ssl_" + vhost
+			matchToken = strings.Replace(matchToken, ".", "_", -1)
+			matchToken = strings.Replace(matchToken, "*", "STAR", -1)
 
-      if len(vhost) >= 3 && vhost[0] == '*' && vhost[1] == '.' {
-        suffixMatches = append(suffixMatches,
-          fmt.Sprintf("  acl %v req_ssl_sni -m dom %v\n", matchToken, strings.SplitN(vhost, ".", 2)[1]))
-        suffixRoutes[matchToken] = appID
-      } else {
-        exactMatches = append(exactMatches,
-          fmt.Sprintf("  acl %v req_ssl_sni -i %v\n", matchToken, vhost))
-        exactRoutes[matchToken] = appID
-      }
+			if len(vhost) >= 3 && vhost[0] == '*' && vhost[1] == '.' {
+				suffixMatches = append(suffixMatches,
+					fmt.Sprintf("  acl %v req_ssl_sni -m dom %v\n", matchToken, strings.SplitN(vhost, ".", 2)[1]))
+				suffixRoutes[matchToken] = appID
+			} else {
+				exactMatches = append(exactMatches,
+					fmt.Sprintf("  acl %v req_ssl_sni -i %v\n", matchToken, vhost))
+				exactRoutes[matchToken] = appID
+			}
 
-      if manager.vhostDefaultHTTPS == appID {
-        vhostDefault = appID
-      }
-    }
+			if manager.vhostDefaultHTTPS == appID {
+				vhostDefault = appID
+			}
+		}
 	}
 
 	var fragment string
