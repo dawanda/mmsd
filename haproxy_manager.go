@@ -352,14 +352,14 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 			"frontend __frontend_%v\n"+
 				"  bind %v:%v%v\n"+
 				"  option dontlognull\n"+
-				"  option forwardfor\n"+
-				"  option http-server-close\n"+
-				"  option abortonclose\n"+
 				"  default_backend %v\n"+
 				"\n"+
 				"backend %v\n"+
 				"  mode http\n"+
 				"  balance leastconn\n"+
+				"  option forwardfor\n"+
+				"  option http-server-close\n"+
+				"  option abortonclose\n"+
 				"  option httpchk GET %v HTTP/1.1\\r\\nHost:\\ %v\n",
 			appID, bindAddr, servicePort, bindOpts, appID, appID,
 			healthCheck.Path, "health-check")
@@ -463,6 +463,7 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 		"# This is an auto generated haproxy configuration!!!\n"+
 			"global\n"+
 			"  maxconn 32768\n"+
+			"  maxconnrate 32768\n"+
 			"  log 127.0.0.1 local0\n"+
 			"  stats socket %v mode 600 level admin\n"+
 			"\n"+
@@ -535,7 +536,6 @@ func (manager *HaproxyMgr) makeGatewayHTTP() string {
 			"  option httplog\n"+
 			"  option dontlognull\n"+
 			"  option forwardfor\n"+
-			"  option abortonclose\n"+
 			"  option http-server-close\n"+
 			"  reqadd X-Forwarded-Proto:\\ http\n"+
 			"\n",
