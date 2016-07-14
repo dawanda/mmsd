@@ -492,7 +492,7 @@ func (mmsd *mmsdService) Run() {
 		os.Exit(0)
 	}
 
-	mmsd.setupManagedIP()
+	//mmsd.setupManagedIP()
 	mmsd.setupHandlers()
 	mmsd.setupEventBusListener()
 	mmsd.setupHttpService()
