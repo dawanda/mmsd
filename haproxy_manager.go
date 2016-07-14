@@ -468,6 +468,7 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 			"  stats socket %v mode 600 level admin\n"+
 			"\n"+
 			"defaults\n"+
+			"  maxconn 32768\n"+
 			"  timeout client 90000\n"+
 			"  timeout server 90000\n"+
 			"  timeout connect 90000\n"+
