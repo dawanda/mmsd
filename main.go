@@ -443,7 +443,7 @@ func (mmsd *mmsdService) MaybeResetFromTasks(force bool) error {
 	return nil
 }
 
-const appVersion = "0.9.9"
+const appVersion = "0.9.10"
 const appLicense = "MIT"
 
 func showVersion() {
