@@ -35,7 +35,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -492,19 +491,11 @@ func (mmsd *mmsdService) Run() {
 		os.Exit(0)
 	}
 
-	//mmsd.setupManagedIP()
 	mmsd.setupHandlers()
 	mmsd.setupEventBusListener()
 	mmsd.setupHttpService()
 
 	<-mmsd.quitChannel
-}
-
-func (mmsd *mmsdService) setupManagedIP() {
-	if runtime.GOOS == "linux" { // only enable on Linux
-		var serviceIP = ServiceIP{VirtualIP: mmsd.ManagedIP.String()}
-		serviceIP.Up()
-	}
 }
 
 func (mmsd *mmsdService) setupHandlers() {
