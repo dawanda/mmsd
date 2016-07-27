@@ -19,7 +19,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/christianparpart/go-marathon/marathon"
+	"github.com/dawanda/go-mesos/marathon"
 )
 
 type HaproxyMgr struct {

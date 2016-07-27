@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/christianparpart/go-marathon/marathon"
+	"github.com/dawanda/go-mesos/marathon"
 )
 
 func PrettifyAppId(name string, portIndex int, servicePort uint) (appID string) {

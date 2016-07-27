@@ -6,7 +6,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/christianparpart/go-marathon/marathon"
+	"github.com/dawanda/go-mesos/marathon"
 	"github.com/dawanda/mmsd/udpproxy"
 )
 

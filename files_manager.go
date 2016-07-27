@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/christianparpart/go-marathon/marathon"
+	"github.com/dawanda/go-mesos/marathon"
 )
 
 type FilesManager struct {

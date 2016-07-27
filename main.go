@@ -40,7 +40,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/christianparpart/go-marathon/marathon"
+	"github.com/dawanda/go-mesos/marathon"
 	"github.com/gorilla/mux"
 	flag "github.com/ogier/pflag"
 )

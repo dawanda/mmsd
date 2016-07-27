@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/christianparpart/go-marathon/marathon"
+	"github.com/dawanda/go-mesos/marathon"
 	"github.com/miekg/dns"
 )
 
