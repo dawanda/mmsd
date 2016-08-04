@@ -52,7 +52,7 @@ func (manager *UdpManager) Apply(apps []*marathon.App, force bool) error {
 }
 
 func (manager *UdpManager) GetFrontend(app *marathon.App, portIndex int, replace bool) (*udpproxy.Frontend, error) {
-	servicePort := app.Container.Docker.PortMappings[portIndex].ServicePort
+	servicePort := app.PortDefinitions[portIndex].Port
 	name := PrettifyAppId(app.Id, portIndex, servicePort)
 
 	server, ok := manager.Servers[name]
