@@ -403,12 +403,17 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 	result += "  retries 1\n"
 
 	for _, task := range sortTasks(app.Tasks, portIndex) {
-		result += fmt.Sprintf(
-			"  server %v:%v %v:%v%v\n",
-			task.Host, task.Ports[portIndex], // taskLabel == "$host:$port"
-			SoftResolveIPAddr(task.Host),
-			task.Ports[portIndex],
-			serverOpts)
+		// Include the task iff it is in running state or a state is not provided.
+		// The latter is kept for backwards compatibility with older
+		// Marathon services
+		if task.State == nil || *task.State == marathon.TaskRunning {
+			result += fmt.Sprintf(
+				"  server %v:%v %v:%v%v\n",
+				task.Host, task.Ports[portIndex], // taskLabel == "$host:$port"
+				SoftResolveIPAddr(task.Host),
+				task.Ports[portIndex],
+				serverOpts)
+		}
 	}
 
 	result += "\n"
