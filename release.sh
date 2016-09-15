@@ -17,6 +17,10 @@ fi
 
 PV="${1}"
 
+opts=""
+if [[ "$2" == "-f" ]]; then
+  opts="$ops -f"
+fi
 
 if git status | grep -q "modified:"; then
   echo "Sorry, commit your changes first."
@@ -38,5 +42,5 @@ echo "Using version: $PV"
 sed -i -e 's/\(const appVersion = \)".*"$/\1"'${PV}'"/' main.go
 
 git ci main.go -m "release $PV"
-git tag $PV
-git push --tags
+git tag ${opts} $PV
+git push ${opts} --tags
