@@ -56,6 +56,7 @@ type mmsdService struct {
 	HttpApiPort       uint
 	Verbose           bool
 	Handlers          []mmsdHandler
+	Listeners         []EventListener
 	quitChannel       chan bool
 	RunStateDir       string
 	FilterGroups      string
@@ -98,6 +99,9 @@ type mmsdService struct {
 	DnsBaseName string
 	DnsTTL      time.Duration
 	DnsPushSRV  bool
+
+	// runtime state
+	apps []AppCluster
 }
 
 func (mmsd *mmsdService) setupHttpService() {
@@ -121,6 +125,55 @@ func (mmsd *mmsdService) v0Ping(w http.ResponseWriter, r *http.Request) {
 
 func (mmsd *mmsdService) v0Version(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "mmsd %v\n", appVersion)
+}
+
+func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []AppCluster {
+	var apps []AppCluster
+	for _, mApp := range mApps {
+		for portIndex, _ := range mApp.PortDefinitions {
+			var healthCheck *AppHealthCheck
+			if mHealthCheck := FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
+				var mCommand *string
+				if mHealthCheck.Command != nil {
+					mCommand = new(string)
+					*mCommand = mHealthCheck.Command.Value
+				}
+				healthCheck = &AppHealthCheck{
+					Protocol:               mHealthCheck.Protocol,
+					Path:                   mHealthCheck.Path,
+					Command:                mCommand,
+					GracePeriodSeconds:     mHealthCheck.GracePeriodSeconds,
+					IntervalSeconds:        mHealthCheck.IntervalSeconds,
+					TimeoutSeconds:         mHealthCheck.TimeoutSeconds,
+					MaxConsecutiveFailures: mHealthCheck.MaxConsecutiveFailures,
+					IgnoreHttp1xx:          mHealthCheck.IgnoreHttp1xx,
+				}
+			}
+
+			var backends []AppBackend
+			for _, mTask := range mApp.Tasks {
+				backends = append(backends, AppBackend{
+					Id:    mTask.Id,
+					Host:  mTask.Host,
+					Port:  mTask.Ports[portIndex],
+					State: string(*mTask.State),
+				})
+			}
+
+			app := AppCluster{
+				Name:        mApp.Id,
+				Id:          PrettifyAppId2(mApp.Id, portIndex),
+				ServicePort: mApp.PortDefinitions[portIndex].Port,
+				Protocol:    mApp.PortDefinitions[portIndex].Protocol,
+				PortName:    mApp.PortDefinitions[portIndex].Name,
+				Labels:      mApp.PortDefinitions[portIndex].Labels,
+				HealthCheck: healthCheck,
+				Backends:    backends,
+			}
+			apps = append(apps, app)
+		}
+	}
+	return apps
 }
 
 func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
@@ -290,6 +343,8 @@ func (mmsd *mmsdService) setupEventBusListener() {
 
 	sse.OnOpen = func(event, data string) {
 		log.Printf("Listening for events from Marathon on %v\n", url)
+
+		mmsd.applyApps(mmsd.convertMarathonApps(mmsd.getMarathonApps()))
 	}
 
 	sse.OnError = func(event, data string) {
@@ -320,6 +375,16 @@ func (mmsd *mmsdService) setupEventBusListener() {
 	go sse.RunForever()
 }
 
+func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []AppCluster {
+	var apps []AppCluster
+	for _, app := range mmsd.apps {
+		if app.Name == mAppId {
+			apps = append(apps, app)
+		}
+	}
+	return apps
+}
+
 func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 	switch event.TaskStatus {
 	case marathon.TaskRunning:
@@ -334,10 +399,30 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 		// XXX Only update propagate no health checks have been configured.
 		// So we consider thie TASK_RUNNING state as healthy-notice.
 		if len(app.HealthChecks) == 0 {
+			for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
+				for _, task := range app.Backends {
+					if task.Id == event.TaskId {
+						for _, listener := range mmsd.Listeners {
+							listener.AddTask(task, app)
+						}
+					}
+				}
+			}
+			//.
 			mmsd.Update(event.AppId, event.TaskId, true)
 		}
 	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilling, marathon.TaskKilled, marathon.TaskLost:
 		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
+		for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
+			for _, task := range app.Backends {
+				if task.Id == event.TaskId {
+					for _, listener := range mmsd.Listeners {
+						listener.RemoveTask(task, app)
+					}
+				}
+			}
+		}
+		//.
 		app, err := mmsd.getMarathonApp(event.AppId)
 		if err != nil {
 			log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
@@ -348,6 +433,21 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 }
 
 func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusChangedEvent) {
+	for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
+		for _, task := range app.Backends {
+			if task.Id == event.TaskId {
+				for _, listener := range mmsd.Listeners {
+					if event.Alive {
+						listener.AddTask(task, app)
+					} else {
+						listener.RemoveTask(task, app)
+					}
+				}
+			}
+		}
+	}
+	// EOF
+
 	app, err := mmsd.getMarathonApp(event.AppId)
 	if err != nil {
 		log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
@@ -374,6 +474,22 @@ func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusCh
 	}
 
 	mmsd.Update(event.AppId, event.TaskId, event.Alive)
+}
+
+func (mmsd *mmsdService) getMarathonApps() []marathon.App {
+	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
+	if err != nil {
+		log.Printf("Failed to get marathon.Service: %v\n", err)
+		return nil
+	}
+
+	mApps, err := m.GetApps()
+	var mApps2 []marathon.App
+	for _, mApp := range mApps {
+		mApps2 = append(mApps2, *mApp)
+	}
+
+	return mApps2
 }
 
 func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
@@ -498,7 +614,19 @@ func (mmsd *mmsdService) Run() {
 	<-mmsd.quitChannel
 }
 
+func (mmsd *mmsdService) applyApps(apps []AppCluster) {
+	mmsd.apps = apps
+
+	for _, listener := range mmsd.Listeners {
+		listener.Apply(apps)
+	}
+}
+
 func (mmsd *mmsdService) setupHandlers() {
+	mmsd.Listeners = append(mmsd.Listeners, &EventLogger{
+		Verbose: true,
+	})
+
 	if mmsd.DnsEnabled {
 		mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
 			Verbose:     mmsd.Verbose,
