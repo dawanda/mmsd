@@ -56,7 +56,7 @@ type mmsdService struct {
 	Handlers          []EventListener
 	quitChannel       chan bool
 	RunStateDir       string
-	FilterGroups      string
+	FilterGroups      []string
 	LocalHealthChecks bool
 	ManagementAddr    net.IP
 
@@ -227,6 +227,15 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 
 // }}}
 
+func (mmsd *mmsdService) isGroupIncluded(groupName string) bool {
+	for _, filterGroup := range mmsd.FilterGroups {
+		if groupName == filterGroup || filterGroup == "*" {
+			return true
+		}
+	}
+	return false
+}
+
 func (mmsd *mmsdService) getMarathonApps() []marathon.App {
 	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
 	if err != nil {
@@ -260,47 +269,49 @@ func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
 func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []AppCluster {
 	var apps []AppCluster
 	for _, mApp := range mApps {
-		for portIndex, _ := range mApp.PortDefinitions {
-			var healthCheck *AppHealthCheck
-			if mHealthCheck := FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
-				var mCommand *string
-				if mHealthCheck.Command != nil {
-					mCommand = new(string)
-					*mCommand = mHealthCheck.Command.Value
+		for portIndex, portDef := range mApp.PortDefinitions {
+			if mmsd.isGroupIncluded(portDef.Labels["lb-group"]) {
+				var healthCheck *AppHealthCheck
+				if mHealthCheck := FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
+					var mCommand *string
+					if mHealthCheck.Command != nil {
+						mCommand = new(string)
+						*mCommand = mHealthCheck.Command.Value
+					}
+					healthCheck = &AppHealthCheck{
+						Protocol:               mHealthCheck.Protocol,
+						Path:                   mHealthCheck.Path,
+						Command:                mCommand,
+						GracePeriodSeconds:     mHealthCheck.GracePeriodSeconds,
+						IntervalSeconds:        mHealthCheck.IntervalSeconds,
+						TimeoutSeconds:         mHealthCheck.TimeoutSeconds,
+						MaxConsecutiveFailures: mHealthCheck.MaxConsecutiveFailures,
+						IgnoreHttp1xx:          mHealthCheck.IgnoreHttp1xx,
+					}
 				}
-				healthCheck = &AppHealthCheck{
-					Protocol:               mHealthCheck.Protocol,
-					Path:                   mHealthCheck.Path,
-					Command:                mCommand,
-					GracePeriodSeconds:     mHealthCheck.GracePeriodSeconds,
-					IntervalSeconds:        mHealthCheck.IntervalSeconds,
-					TimeoutSeconds:         mHealthCheck.TimeoutSeconds,
-					MaxConsecutiveFailures: mHealthCheck.MaxConsecutiveFailures,
-					IgnoreHttp1xx:          mHealthCheck.IgnoreHttp1xx,
+
+				var backends []AppBackend
+				for _, mTask := range mApp.Tasks {
+					backends = append(backends, AppBackend{
+						Id:    mTask.Id,
+						Host:  mTask.Host,
+						Port:  mTask.Ports[portIndex],
+						State: string(*mTask.State),
+					})
 				}
-			}
 
-			var backends []AppBackend
-			for _, mTask := range mApp.Tasks {
-				backends = append(backends, AppBackend{
-					Id:    mTask.Id,
-					Host:  mTask.Host,
-					Port:  mTask.Ports[portIndex],
-					State: string(*mTask.State),
-				})
+				app := AppCluster{
+					Name:        mApp.Id,
+					Id:          PrettifyAppId2(mApp.Id, portIndex),
+					ServicePort: mApp.PortDefinitions[portIndex].Port,
+					Protocol:    mApp.PortDefinitions[portIndex].Protocol,
+					PortName:    mApp.PortDefinitions[portIndex].Name,
+					Labels:      mApp.PortDefinitions[portIndex].Labels,
+					HealthCheck: healthCheck,
+					Backends:    backends,
+				}
+				apps = append(apps, app)
 			}
-
-			app := AppCluster{
-				Name:        mApp.Id,
-				Id:          PrettifyAppId2(mApp.Id, portIndex),
-				ServicePort: mApp.PortDefinitions[portIndex].Port,
-				Protocol:    mApp.PortDefinitions[portIndex].Protocol,
-				PortName:    mApp.PortDefinitions[portIndex].Name,
-				Labels:      mApp.PortDefinitions[portIndex].Labels,
-				HealthCheck: healthCheck,
-				Backends:    backends,
-			}
-			apps = append(apps, app)
 		}
 	}
 	return apps
@@ -419,12 +430,13 @@ func showVersion() {
 }
 
 func (mmsd *mmsdService) Run() {
+	var filterGroups = "*"
 	flag.BoolVarP(&mmsd.Verbose, "verbose", "v", mmsd.Verbose, "Set verbosity level")
 	flag.IPVar(&mmsd.MarathonIP, "marathon-ip", mmsd.MarathonIP, "Marathon endpoint TCP IP address")
 	flag.UintVar(&mmsd.MarathonPort, "marathon-port", mmsd.MarathonPort, "Marathon endpoint TCP port number")
 	flag.DurationVar(&mmsd.ReconnectDelay, "reconnect-delay", mmsd.ReconnectDelay, "Marathon reconnect delay")
 	flag.StringVar(&mmsd.RunStateDir, "run-state-dir", mmsd.RunStateDir, "Path to directory to keep run-state")
-	flag.StringVar(&mmsd.FilterGroups, "filter-groups", mmsd.FilterGroups, "Application group filter")
+	flag.StringVar(&filterGroups, "filter-groups", filterGroups, "Application group filter")
 	flag.IPVar(&mmsd.ManagedIP, "managed-ip", mmsd.ManagedIP, "IP-address to manage for mmsd")
 	flag.BoolVar(&mmsd.GatewayEnabled, "enable-gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.IPVar(&mmsd.GatewayAddr, "gateway-bind", mmsd.GatewayAddr, "gateway bind address")
@@ -453,6 +465,8 @@ func (mmsd *mmsdService) Run() {
 	}
 
 	flag.Parse()
+
+	mmsd.FilterGroups = strings.Split(filterGroups, ",")
 
 	if *showVersionAndExit {
 		showVersion()
@@ -504,7 +518,6 @@ func (mmsd *mmsdService) setupHandlers() {
 		mmsd.Handlers = append(mmsd.Handlers, &HaproxyMgr{
 			Verbose:           mmsd.Verbose,
 			LocalHealthChecks: mmsd.LocalHealthChecks,
-			FilterGroups:      strings.Split(mmsd.FilterGroups, ","),
 			ServiceAddr:       mmsd.ServiceAddr,
 			GatewayEnabled:    mmsd.GatewayEnabled,
 			GatewayAddr:       mmsd.GatewayAddr,
@@ -556,7 +569,6 @@ func main() {
 		MarathonPort:      8080,
 		ReconnectDelay:    time.Second * 4,
 		RunStateDir:       "/var/run/mmsd",
-		FilterGroups:      "*",
 		GatewayEnabled:    false,
 		GatewayAddr:       net.ParseIP("0.0.0.0"),
 		GatewayPortHTTP:   80,
