@@ -11,33 +11,23 @@ import (
 )
 
 type UdpManager struct {
-	Enabled  bool
 	Verbose  bool
 	BindAddr net.IP
 	Servers  map[string]*udpproxy.Frontend
 }
 
-func NewUdpManager(bindAddr net.IP, verbose bool, enabled bool) *UdpManager {
+func NewUdpManager(bindAddr net.IP, verbose bool) *UdpManager {
 	return &UdpManager{
-		Enabled:  enabled,
 		Verbose:  verbose,
 		BindAddr: bindAddr,
 		Servers:  make(map[string]*udpproxy.Frontend),
 	}
 }
 
-func (manager *UdpManager) Setup() error {
-	return nil
+func (manager *UdpManager) Startup() {
 }
 
-func (manager *UdpManager) IsEnabled() bool {
-	return manager.Enabled
-}
-
-func (manager *UdpManager) SetEnabled(value bool) {
-	if value != manager.Enabled {
-		manager.Enabled = value
-	}
+func (manager *UdpManager) Shutdown() {
 }
 
 func (manager *UdpManager) Apply(apps []*marathon.App, force bool) error {

@@ -23,7 +23,6 @@ import (
 )
 
 type HaproxyMgr struct {
-	Enabled            bool
 	Verbose            bool
 	LocalHealthChecks  bool
 	FilterGroups       []string
@@ -141,21 +140,22 @@ func makeStringArray(s string) []string {
 	}
 }
 
-func (manager *HaproxyMgr) Setup() error {
-	return nil
+func (manager *HaproxyMgr) Startup() {
 }
 
-func (manager *HaproxyMgr) IsEnabled() bool {
-	return manager.Enabled
+func (manager *HaproxyMgr) Shutdown() {
 }
 
-func (manager *HaproxyMgr) SetEnabled(value bool) {
-	if value != manager.Enabled {
-		manager.Enabled = value
-	}
+func (manager *HaproxyMgr) Apply(apps []AppCluster) {
 }
 
-func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
+func (manager *HaproxyMgr) AddTask(task AppBackend, app AppCluster) {
+}
+
+func (manager *HaproxyMgr) RemoveTask(task AppBackend, app AppCluster) {
+}
+
+func (manager *HaproxyMgr) OLD_Apply(apps []*marathon.App, force bool) error {
 	manager.appConfigFragments = make(map[string]string)
 	manager.clearAppStateCache()
 
@@ -184,7 +184,7 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 	return manager.reloadConfig(false)
 }
 
-func (manager *HaproxyMgr) Remove(appID string, taskID string, app *marathon.App) error {
+func (manager *HaproxyMgr) OLD_Remove(appID string, taskID string, app *marathon.App) error {
 	if app != nil {
 		// make sure we *remove* the task from the cluster
 		config, err := manager.makeConfig(app)
@@ -213,23 +213,10 @@ func (manager *HaproxyMgr) Remove(appID string, taskID string, app *marathon.App
 }
 
 func isAppJustSpawned(app *marathon.App) bool {
-	// find out if an app has just been spawned by checking
-	// if it ever failed already.
-
-	if len(app.Tasks) == 0 {
-		return false
-	}
-
-	for _, hsr := range app.Tasks[0].HealthCheckResults {
-		if hsr.LastFailure != nil {
-			return false
-		}
-	}
-
-	return true
+	return false // XXX removed
 }
 
-func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
+func (manager *HaproxyMgr) OLD_Update(app *marathon.App, taskID string) error {
 	// collect list of task labels as we formatted them in haproxy.cfg.
 	var instanceNames []string
 	for portIndex, servicePort := range app.Ports {

@@ -28,7 +28,6 @@ XXX Changes:
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -36,7 +35,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -55,8 +53,7 @@ type mmsdHandler interface {
 type mmsdService struct {
 	HttpApiPort       uint
 	Verbose           bool
-	Handlers          []mmsdHandler
-	Listeners         []EventListener
+	Handlers          []EventListener
 	quitChannel       chan bool
 	RunStateDir       string
 	FilterGroups      string
@@ -104,6 +101,7 @@ type mmsdService struct {
 	apps []AppCluster
 }
 
+// {{{ HTTP endpoint
 func (mmsd *mmsdService) setupHttpService() {
 	router := mux.NewRouter()
 	router.HandleFunc("/ping", mmsd.v0Ping)
@@ -125,55 +123,6 @@ func (mmsd *mmsdService) v0Ping(w http.ResponseWriter, r *http.Request) {
 
 func (mmsd *mmsdService) v0Version(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "mmsd %v\n", appVersion)
-}
-
-func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []AppCluster {
-	var apps []AppCluster
-	for _, mApp := range mApps {
-		for portIndex, _ := range mApp.PortDefinitions {
-			var healthCheck *AppHealthCheck
-			if mHealthCheck := FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
-				var mCommand *string
-				if mHealthCheck.Command != nil {
-					mCommand = new(string)
-					*mCommand = mHealthCheck.Command.Value
-				}
-				healthCheck = &AppHealthCheck{
-					Protocol:               mHealthCheck.Protocol,
-					Path:                   mHealthCheck.Path,
-					Command:                mCommand,
-					GracePeriodSeconds:     mHealthCheck.GracePeriodSeconds,
-					IntervalSeconds:        mHealthCheck.IntervalSeconds,
-					TimeoutSeconds:         mHealthCheck.TimeoutSeconds,
-					MaxConsecutiveFailures: mHealthCheck.MaxConsecutiveFailures,
-					IgnoreHttp1xx:          mHealthCheck.IgnoreHttp1xx,
-				}
-			}
-
-			var backends []AppBackend
-			for _, mTask := range mApp.Tasks {
-				backends = append(backends, AppBackend{
-					Id:    mTask.Id,
-					Host:  mTask.Host,
-					Port:  mTask.Ports[portIndex],
-					State: string(*mTask.State),
-				})
-			}
-
-			app := AppCluster{
-				Name:        mApp.Id,
-				Id:          PrettifyAppId2(mApp.Id, portIndex),
-				ServicePort: mApp.PortDefinitions[portIndex].Port,
-				Protocol:    mApp.PortDefinitions[portIndex].Protocol,
-				PortName:    mApp.PortDefinitions[portIndex].Name,
-				Labels:      mApp.PortDefinitions[portIndex].Labels,
-				HealthCheck: healthCheck,
-				Backends:    backends,
-			}
-			apps = append(apps, app)
-		}
-	}
-	return apps
 }
 
 func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
@@ -199,52 +148,6 @@ func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(appList)
 
 	fmt.Fprintf(w, "%s\n", strings.Join(appList, "\n"))
-}
-
-var ErrInvalidPortRange = errors.New("Invalid port range")
-
-func parseRange(input string) (int, int, error) {
-	if len(input) == 0 {
-		return 0, 0, nil
-	}
-
-	vals := strings.Split(input, ":")
-	log.Printf("vals: %+q\n", vals)
-
-	if len(vals) == 1 {
-		i, err := strconv.Atoi(input)
-		return i, i, err
-	}
-
-	if len(vals) > 2 {
-		return 0, 0, ErrInvalidPortRange
-	}
-
-	var (
-		begin int
-		end   int
-		err   error
-	)
-
-	// parse begin
-	if vals[0] != "" {
-		begin, err = strconv.Atoi(vals[0])
-		if err != nil {
-			return begin, end, err
-		}
-	}
-
-	// parse end
-	if vals[1] != "" {
-		end, err = strconv.Atoi(vals[1])
-		if begin > end {
-			return begin, end, ErrInvalidPortRange
-		}
-	} else {
-		end = -1 // XXX that is: until the end
-	}
-
-	return begin, end, err
 }
 
 func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
@@ -322,17 +225,95 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func resolveIPAddr(dns string, skip bool) string {
-	if skip {
-		return dns
-	} else {
-		ip, err := net.ResolveIPAddr("ip", dns)
-		if err != nil {
-			return dns
-		} else {
-			return ip.String()
+// }}}
+
+func (mmsd *mmsdService) getMarathonApps() []marathon.App {
+	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
+	if err != nil {
+		log.Printf("Failed to get marathon.Service: %v\n", err)
+		return nil
+	}
+
+	mApps, err := m.GetApps()
+	var mApps2 []marathon.App
+	for _, mApp := range mApps {
+		mApps2 = append(mApps2, *mApp)
+	}
+
+	return mApps2
+}
+
+func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
+	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
+	if err != nil {
+		return nil, err
+	}
+
+	app, err := m.GetApp(appID)
+	if err != nil {
+		return nil, err
+	}
+
+	return app, nil
+}
+
+func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []AppCluster {
+	var apps []AppCluster
+	for _, mApp := range mApps {
+		for portIndex, _ := range mApp.PortDefinitions {
+			var healthCheck *AppHealthCheck
+			if mHealthCheck := FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
+				var mCommand *string
+				if mHealthCheck.Command != nil {
+					mCommand = new(string)
+					*mCommand = mHealthCheck.Command.Value
+				}
+				healthCheck = &AppHealthCheck{
+					Protocol:               mHealthCheck.Protocol,
+					Path:                   mHealthCheck.Path,
+					Command:                mCommand,
+					GracePeriodSeconds:     mHealthCheck.GracePeriodSeconds,
+					IntervalSeconds:        mHealthCheck.IntervalSeconds,
+					TimeoutSeconds:         mHealthCheck.TimeoutSeconds,
+					MaxConsecutiveFailures: mHealthCheck.MaxConsecutiveFailures,
+					IgnoreHttp1xx:          mHealthCheck.IgnoreHttp1xx,
+				}
+			}
+
+			var backends []AppBackend
+			for _, mTask := range mApp.Tasks {
+				backends = append(backends, AppBackend{
+					Id:    mTask.Id,
+					Host:  mTask.Host,
+					Port:  mTask.Ports[portIndex],
+					State: string(*mTask.State),
+				})
+			}
+
+			app := AppCluster{
+				Name:        mApp.Id,
+				Id:          PrettifyAppId2(mApp.Id, portIndex),
+				ServicePort: mApp.PortDefinitions[portIndex].Port,
+				Protocol:    mApp.PortDefinitions[portIndex].Protocol,
+				PortName:    mApp.PortDefinitions[portIndex].Name,
+				Labels:      mApp.PortDefinitions[portIndex].Labels,
+				HealthCheck: healthCheck,
+				Backends:    backends,
+			}
+			apps = append(apps, app)
 		}
 	}
+	return apps
+}
+
+func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []AppCluster {
+	var apps []AppCluster
+	for _, app := range mmsd.apps {
+		if app.Name == mAppId {
+			apps = append(apps, app)
+		}
+	}
+	return apps
 }
 
 func (mmsd *mmsdService) setupEventBusListener() {
@@ -375,16 +356,6 @@ func (mmsd *mmsdService) setupEventBusListener() {
 	go sse.RunForever()
 }
 
-func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []AppCluster {
-	var apps []AppCluster
-	for _, app := range mmsd.apps {
-		if app.Name == mAppId {
-			apps = append(apps, app)
-		}
-	}
-	return apps
-}
-
 func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 	switch event.TaskStatus {
 	case marathon.TaskRunning:
@@ -402,33 +373,24 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 			for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
 				for _, task := range app.Backends {
 					if task.Id == event.TaskId {
-						for _, listener := range mmsd.Listeners {
-							listener.AddTask(task, app)
+						for _, handler := range mmsd.Handlers {
+							handler.AddTask(task, app)
 						}
 					}
 				}
 			}
-			//.
-			mmsd.Update(event.AppId, event.TaskId, true)
 		}
 	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilling, marathon.TaskKilled, marathon.TaskLost:
 		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
 		for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
 			for _, task := range app.Backends {
 				if task.Id == event.TaskId {
-					for _, listener := range mmsd.Listeners {
-						listener.RemoveTask(task, app)
+					for _, handler := range mmsd.Handlers {
+						handler.RemoveTask(task, app)
 					}
 				}
 			}
 		}
-		//.
-		app, err := mmsd.getMarathonApp(event.AppId)
-		if err != nil {
-			log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
-			return
-		}
-		mmsd.Remove(event.AppId, event.TaskId, app)
 	}
 }
 
@@ -436,126 +398,16 @@ func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusCh
 	for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
 		for _, task := range app.Backends {
 			if task.Id == event.TaskId {
-				for _, listener := range mmsd.Listeners {
+				for _, handler := range mmsd.Handlers {
 					if event.Alive {
-						listener.AddTask(task, app)
+						handler.AddTask(task, app)
 					} else {
-						listener.RemoveTask(task, app)
+						handler.RemoveTask(task, app)
 					}
 				}
 			}
 		}
 	}
-	// EOF
-
-	app, err := mmsd.getMarathonApp(event.AppId)
-	if err != nil {
-		log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
-		return
-	}
-	if app == nil {
-		log.Printf("App %v not found anymore.\n", event.AppId)
-		return
-	}
-
-	task := app.GetTaskById(event.TaskId)
-	if task == nil {
-		log.Printf("App %v task %v not found anymore.\n", event.AppId, event.TaskId)
-		mmsd.Remove(event.AppId, event.TaskId, app)
-		return
-	}
-
-	// app & task definitely do exist, so propagate health change event
-
-	if event.Alive {
-		log.Printf("App %v task %v on %v is healthy.\n", event.AppId, event.TaskId, task.Host)
-	} else {
-		log.Printf("App %v task %v on %v is unhealthy.\n", event.AppId, event.TaskId, task.Host)
-	}
-
-	mmsd.Update(event.AppId, event.TaskId, event.Alive)
-}
-
-func (mmsd *mmsdService) getMarathonApps() []marathon.App {
-	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
-	if err != nil {
-		log.Printf("Failed to get marathon.Service: %v\n", err)
-		return nil
-	}
-
-	mApps, err := m.GetApps()
-	var mApps2 []marathon.App
-	for _, mApp := range mApps {
-		mApps2 = append(mApps2, *mApp)
-	}
-
-	return mApps2
-}
-
-func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
-	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
-	if err != nil {
-		return nil, err
-	}
-
-	app, err := m.GetApp(appID)
-	if err != nil {
-		return nil, err
-	}
-
-	return app, nil
-}
-
-// enable/disable given app:task
-func (mmsd *mmsdService) Update(appID string, taskID string, alive bool) {
-	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
-	if err != nil {
-		log.Printf("Update: NewService(%q, %v) failed. %v\n", mmsd.MarathonIP, mmsd.MarathonPort, err)
-		return
-	}
-
-	app, err := m.GetApp(appID)
-	if err != nil {
-		log.Printf("Update: GetApp(%q) failed. %v\n", appID, err)
-		return
-	}
-
-	for _, handler := range mmsd.Handlers {
-		err = handler.Update(app, taskID)
-		if err != nil {
-			log.Printf("Update failed. %v\n", err)
-		}
-	}
-}
-
-func (mmsd *mmsdService) Remove(appID string, taskID string, app *marathon.App) {
-	for _, handler := range mmsd.Handlers {
-		err := handler.Remove(appID, taskID, app)
-		if err != nil {
-			log.Printf("Remove failed. %v\n", err)
-		}
-	}
-}
-
-func (mmsd *mmsdService) MaybeResetFromTasks(force bool) error {
-	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
-	if err != nil {
-		return fmt.Errorf("Could not create new marathon service. %v", err)
-	}
-
-	apps, err := m.GetApps()
-	if err != nil {
-		return fmt.Errorf("Could not get apps. %v", err)
-	}
-
-	for _, handler := range mmsd.Handlers {
-		err = handler.Apply(apps, force)
-		if err != nil {
-			log.Printf("Failed to apply changes to handler. %v\n", err)
-		}
-	}
-
-	return nil
 }
 
 const appVersion = "0.9.12"
@@ -619,38 +471,37 @@ func (mmsd *mmsdService) Run() {
 func (mmsd *mmsdService) applyApps(apps []AppCluster) {
 	mmsd.apps = apps
 
-	for _, listener := range mmsd.Listeners {
-		listener.Apply(apps)
+	for _, handler := range mmsd.Handlers {
+		handler.Apply(apps)
 	}
 }
 
 func (mmsd *mmsdService) setupHandlers() {
-	mmsd.Listeners = append(mmsd.Listeners, &EventLogger{
+	mmsd.Handlers = append(mmsd.Handlers, &EventLogger{
 		Verbose: true,
 	})
 
-	if mmsd.DnsEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
-			Verbose:     mmsd.Verbose,
-			ServiceAddr: mmsd.ServiceAddr,
-			ServicePort: mmsd.DnsPort,
-			PushSRV:     mmsd.DnsPushSRV,
-			BaseName:    mmsd.DnsBaseName,
-			DnsTTL:      mmsd.DnsTTL,
-		})
-	}
+	// if mmsd.DnsEnabled {
+	// 	mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
+	// 		Verbose:     mmsd.Verbose,
+	// 		ServiceAddr: mmsd.ServiceAddr,
+	// 		ServicePort: mmsd.DnsPort,
+	// 		PushSRV:     mmsd.DnsPushSRV,
+	// 		BaseName:    mmsd.DnsBaseName,
+	// 		DnsTTL:      mmsd.DnsTTL,
+	// 	})
+	// }
 
-	if mmsd.UDPEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(
-			mmsd.ServiceAddr,
-			mmsd.Verbose,
-			mmsd.UDPEnabled,
-		))
-	}
+	// if mmsd.UDPEnabled {
+	// 	mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(
+	// 		mmsd.ServiceAddr,
+	// 		mmsd.Verbose,
+	// 		mmsd.UDPEnabled,
+	// 	))
+	// }
 
 	if mmsd.TCPEnabled {
 		mmsd.Handlers = append(mmsd.Handlers, &HaproxyMgr{
-			Enabled:           mmsd.TCPEnabled,
 			Verbose:           mmsd.Verbose,
 			LocalHealthChecks: mmsd.LocalHealthChecks,
 			FilterGroups:      strings.Split(mmsd.FilterGroups, ","),
@@ -670,35 +521,21 @@ func (mmsd *mmsdService) setupHandlers() {
 		})
 	}
 
-	if mmsd.FilesEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, &FilesManager{
-			Enabled:  mmsd.FilesEnabled,
-			Verbose:  mmsd.Verbose,
-			BasePath: mmsd.RunStateDir + "/confd",
-		})
-	}
+	// if mmsd.FilesEnabled {
+	// 	mmsd.Handlers = append(mmsd.Handlers, &FilesManager{
+	// 		Verbose:  mmsd.Verbose,
+	// 		BasePath: mmsd.RunStateDir + "/confd",
+	// 	})
+	// }
 
 	for _, handler := range mmsd.Handlers {
-		err := handler.Setup()
-		if err != nil {
-			log.Fatalf("Failed to setup handlers. %v\n", err)
-		}
-	}
-
-	// trigger initial run
-	err := mmsd.MaybeResetFromTasks(true)
-	if err != nil {
-		log.Printf("Could not force task state reset. %v\n", err)
-	}
-
-	for _, listener := range mmsd.Listeners {
-		listener.Startup()
+		handler.Startup()
 	}
 }
 
 func (mmsd *mmsdService) shutdown() {
-	for _, listener := range mmsd.Listeners {
-		listener.Shutdown()
+	for _, handler := range mmsd.Handlers {
+		handler.Shutdown()
 	}
 }
 

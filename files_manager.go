@@ -12,7 +12,6 @@ import (
 )
 
 type FilesManager struct {
-	Enabled  bool
 	Verbose  bool
 	BasePath string
 }
@@ -23,18 +22,10 @@ func (upstream *FilesManager) Log(msg string) {
 	}
 }
 
-func (manager *FilesManager) Setup() error {
-	return nil
+func (manager *FilesManager) Startup() {
 }
 
-func (manager *FilesManager) IsEnabled() bool {
-	return manager.Enabled
-}
-
-func (manager *FilesManager) SetEnabled(value bool) {
-	if value != manager.Enabled {
-		manager.Enabled = value
-	}
+func (manager *FilesManager) Shutdown() {
 }
 
 func (upstream *FilesManager) Remove(appID string, taskID string, app *marathon.App) error {
