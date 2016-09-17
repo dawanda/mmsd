@@ -612,6 +612,8 @@ func (mmsd *mmsdService) Run() {
 	mmsd.setupHttpService()
 
 	<-mmsd.quitChannel
+
+	mmsd.shutdown()
 }
 
 func (mmsd *mmsdService) applyApps(apps []AppCluster) {
@@ -687,6 +689,16 @@ func (mmsd *mmsdService) setupHandlers() {
 	err := mmsd.MaybeResetFromTasks(true)
 	if err != nil {
 		log.Printf("Could not force task state reset. %v\n", err)
+	}
+
+	for _, listener := range mmsd.Listeners {
+		listener.Startup()
+	}
+}
+
+func (mmsd *mmsdService) shutdown() {
+	for _, listener := range mmsd.Listeners {
+		listener.Shutdown()
 	}
 }
 

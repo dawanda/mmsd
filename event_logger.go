@@ -6,6 +6,8 @@ import (
 	"log"
 )
 
+/* EventLogger adds simple event logging to the logger.
+ */
 type EventLogger struct {
 	Verbose bool
 }
