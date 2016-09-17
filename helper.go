@@ -21,6 +21,13 @@ func PrettifyAppId(name string, portIndex int, servicePort uint) (appID string) 
 	return
 }
 
+func PrettifyAppId2(name string, portIndex int) (appID string) {
+	appID = strings.Replace(name[1:], "/", ".", -1)
+	appID = fmt.Sprintf("%v-%v", appID, portIndex)
+
+	return
+}
+
 func PrettifyDnsName(dns string) string {
 	return strings.SplitN(dns, ".", 1)[0]
 }
@@ -163,6 +170,16 @@ func GetHealthCheckProtocol(app *marathon.App, portIndex int) string {
 	}
 
 	return ""
+}
+
+func FindHealthCheckForPortIndex(healthChecks []marathon.HealthCheck, portIndex int) *marathon.HealthCheck {
+	for _, hs := range healthChecks {
+		if hs.PortIndex == portIndex {
+			return &hs
+		}
+	}
+
+	return nil
 }
 
 func GetHealthCheckForPortIndex(healthChecks []marathon.HealthCheck, portIndex int) marathon.HealthCheck {
