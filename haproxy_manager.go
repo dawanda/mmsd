@@ -62,6 +62,77 @@ var (
 	ErrBadExit = errors.New("Bad Process Exit.")
 )
 
+// {{{ SortedVhostsKeys
+type sortedVhosts struct {
+	m map[string][]string
+	s []string
+}
+
+func (sm *sortedVhosts) Len() int {
+	return len(sm.m)
+}
+
+func (sm *sortedVhosts) Less(a, b int) bool {
+	// return sm.m[sm.s[a]] > sm.m[sm.s[b]]
+	return sm.s[a] < sm.s[b]
+}
+
+func (sm *sortedVhosts) Swap(a, b int) {
+	sm.s[a], sm.s[b] = sm.s[b], sm.s[a]
+}
+
+func SortedVhostsKeys(m map[string][]string) []string {
+	sm := new(sortedVhosts)
+	sm.m = m
+	sm.s = make([]string, len(m))
+
+	i := 0
+	for key, _ := range m {
+		sm.s[i] = key
+		i++
+	}
+	sort.Sort(sm)
+
+	return sm.s
+}
+
+// }}}
+// {{{ SortedStrStrKeys
+type sortedStrStrKeys struct {
+	m map[string]string
+	s []string
+}
+
+func (sm *sortedStrStrKeys) Len() int {
+	return len(sm.m)
+}
+
+func (sm *sortedStrStrKeys) Less(a, b int) bool {
+	// return sm.m[sm.s[a]] > sm.m[sm.s[b]]
+	return sm.s[a] < sm.s[b]
+}
+
+func (sm *sortedStrStrKeys) Swap(a, b int) {
+	sm.s[a], sm.s[b] = sm.s[b], sm.s[a]
+}
+
+func SortedStrStrKeys(m map[string]string) []string {
+	sm := new(sortedStrStrKeys)
+	sm.m = m
+	sm.s = make([]string, len(m))
+
+	i := 0
+	for key, _ := range m {
+		sm.s[i] = key
+		i++
+	}
+	sort.Sort(sm)
+
+	return sm.s
+}
+
+// }}}
+
 func makeStringArray(s string) []string {
 	if len(s) == 0 {
 		return []string{}
@@ -511,7 +582,8 @@ func (manager *HaproxyMgr) makeGatewayHTTP() string {
 		port          uint = manager.GatewayPortHTTP
 	)
 
-	for appID, vhosts := range manager.vhosts {
+	for _, appID := range SortedVhostsKeys(manager.vhosts) {
+		vhosts := manager.vhosts[appID]
 		for _i, vhost := range vhosts {
 			log.Printf("[haproxy] appID:%v, vhost:%v, i:%v\n", appID, vhost, _i)
 			matchToken := "vhost_" + vhost
@@ -555,11 +627,13 @@ func (manager *HaproxyMgr) makeGatewayHTTP() string {
 		fragment += "\n"
 	}
 
-	for acl, appID := range exactRoutes {
+	for _, acl := range SortedStrStrKeys(exactRoutes) {
+		appID := exactRoutes[acl]
 		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
 	}
 
-	for acl, appID := range suffixRoutes {
+	for _, acl := range SortedStrStrKeys(suffixRoutes) {
+		appID := suffixRoutes[acl]
 		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
 	}
 
@@ -583,7 +657,8 @@ func (manager *HaproxyMgr) makeGatewayHTTPS() string {
 		port          uint = manager.GatewayPortHTTPS
 	)
 
-	for appID, vhosts := range manager.vhostsHTTPS {
+	for _, appID := range SortedVhostsKeys(manager.vhostsHTTPS) {
+		vhosts := manager.vhostsHTTPS[appID]
 		for _, vhost := range vhosts {
 			matchToken := "vhost_ssl_" + vhost
 			matchToken = strings.Replace(matchToken, ".", "_", -1)
@@ -623,11 +698,13 @@ func (manager *HaproxyMgr) makeGatewayHTTPS() string {
 		fragment += "\n"
 	}
 
-	for acl, appID := range exactRoutes {
+	for _, acl := range SortedStrStrKeys(exactRoutes) {
+		appID := exactRoutes[acl]
 		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
 	}
 
-	for acl, appID := range suffixRoutes {
+	for _, acl := range SortedStrStrKeys(suffixRoutes) {
+		appID := suffixRoutes[acl]
 		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
 	}
 
