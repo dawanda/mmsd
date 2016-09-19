@@ -10,7 +10,7 @@ type AppCluster struct {
 	PortName    string
 	Labels      map[string]string
 	HealthCheck *AppHealthCheck
-	Backends    []AppBackend
+	Backends    []AppBackend // TODO ensured to be always ordered
 }
 
 type AppHealthCheck struct {
