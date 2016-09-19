@@ -70,7 +70,9 @@ func (module *HaproxyModule) Apply(apps []AppCluster) {
 	log.Printf("Haproxy: apply([]AppCluster)")
 
 	for _, app := range apps {
-		module.appConfigCache[app.Id] = module.makeConfig(app)
+		if app.Protocol == "TCP" || app.Protocol == "HTTP" {
+			module.appConfigCache[app.Id] = module.makeConfig(app)
+		}
 	}
 
 	err := module.writeConfig()
