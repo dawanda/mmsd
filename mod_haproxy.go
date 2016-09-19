@@ -60,6 +60,8 @@ func (module *HaproxyModule) Startup() {
 
 	module.vhostsHTTPS = make(map[string][]string)
 	module.vhostDefaultHTTPS = ""
+
+	module.appConfigCache = make(map[string]string)
 }
 
 func (module *HaproxyModule) Shutdown() {
@@ -146,9 +148,9 @@ func (module *HaproxyModule) makeConfig(app AppCluster) string {
 			app.Id, app.Labels["lb-proxy-protocol"])
 	}
 
-	var appProtocol = app.Protocol
+	var appProtocol = module.getAppProtocol(app)
 	switch appProtocol {
-	case "http":
+	case "HTTP":
 		result += fmt.Sprintf(
 			"frontend __frontend_%v\n"+
 				"  bind %v:%v%v\n"+
@@ -345,7 +347,6 @@ func (module *HaproxyModule) makeGatewayHTTP() string {
 		"frontend __gateway_http\n"+
 			"  bind %v:%v\n"+
 			"  mode http\n"+
-			"  option httplog\n"+
 			"  option dontlognull\n"+
 			"  option forwardfor\n"+
 			"  option http-server-close\n"+
@@ -526,11 +527,23 @@ func (module *HaproxyModule) exec(logMessage string, args ...string) error {
 	return err
 }
 
+func (module *HaproxyModule) getAppProtocol(app AppCluster) string {
+	if app.HealthCheck != nil {
+		if app.HealthCheck.Protocol != "COMMAND" {
+			return strings.ToUpper(app.HealthCheck.Protocol)
+		}
+	}
+
+	return strings.ToUpper(app.Protocol)
+}
+
 func (module *HaproxyModule) supportsProtocol(proto string) bool {
+	proto = strings.ToUpper(proto)
+
 	if proto == "TCP" || proto == "HTTP" {
 		return true
 	} else {
-		log.Printf("Haproxy: Protocol not supported: %v")
+		log.Printf("Haproxy: Protocol not supported: %v", proto)
 		return false
 	}
 }
