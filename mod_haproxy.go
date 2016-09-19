@@ -70,7 +70,7 @@ func (module *HaproxyModule) Apply(apps []AppCluster) {
 	log.Printf("Haproxy: apply([]AppCluster)")
 
 	for _, app := range apps {
-		if app.Protocol == "TCP" || app.Protocol == "HTTP" {
+		if module.supportsProtocol(app.Protocol) {
 			module.appConfigCache[app.Id] = module.makeConfig(app)
 		}
 	}
@@ -88,6 +88,9 @@ func (module *HaproxyModule) Apply(apps []AppCluster) {
 }
 
 func (module *HaproxyModule) AddTask(task AppBackend, app AppCluster) {
+	if !module.supportsProtocol(app.Protocol) {
+		return
+	}
 	log.Printf("Haproxy: AddTask()")
 }
 
@@ -521,6 +524,15 @@ func (module *HaproxyModule) exec(logMessage string, args ...string) error {
 	}
 
 	return err
+}
+
+func (module *HaproxyModule) supportsProtocol(proto string) bool {
+	if proto == "TCP" || proto == "HTTP" {
+		return true
+	} else {
+		log.Printf("Haproxy: Protocol not supported: %v")
+		return false
+	}
 }
 
 // {{{ SortedVhostsKeys
