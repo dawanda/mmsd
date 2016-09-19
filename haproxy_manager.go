@@ -315,22 +315,11 @@ func (manager *HaproxyMgr) makeConfig(app *marathon.App) (string, error) {
 		manager.appLabels[app.Id][k] = v
 	}
 
-	for portIndex, portDef := range app.PortDefinitions {
-		if manager.isGroupIncluded(portDef.Labels["lb-group"]) {
-			result += manager.makeConfigForPort(app, portIndex)
-		}
+	for portIndex, _ := range app.PortDefinitions {
+		result += manager.makeConfigForPort(app, portIndex)
 	}
 
 	return result, nil
-}
-
-func (manager *HaproxyMgr) isGroupIncluded(groupName string) bool {
-	for _, filterGroup := range manager.FilterGroups {
-		if groupName == filterGroup || filterGroup == "*" {
-			return true
-		}
-	}
-	return false
 }
 
 func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) string {
