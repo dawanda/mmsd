@@ -423,17 +423,23 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 	}
 }
 
-func (mmsd *mmsdService) RemoveTask(appId, taskId string, newStatus marathon.TaskStatus) {
+func (mmsd *mmsdService) RemoveTask(appId, taskId string, newStatus marathon.TaskStatus) bool {
 	for _, app := range mmsd.findAppsByMarathonId(appId) {
-		for _, task := range app.Backends {
-			task.State = string(newStatus)
+		for i, task := range app.Backends {
 			if task.Id == taskId {
+				// update task state, and remove task out of app cluster's task list
+				task.State = string(newStatus)
+				app.Backends = append(app.Backends[:0], app.Backends[i+1:]...)
+
 				for _, handler := range mmsd.Handlers {
 					handler.RemoveTask(&task, app)
 				}
+
+				return true
 			}
 		}
 	}
+	return false
 }
 
 func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusChangedEvent) {
