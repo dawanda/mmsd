@@ -6,7 +6,6 @@ package main
 // TODO: support local-health checks *or* marathon-based health check propagation (--local-health-checks=false)
 
 import (
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -46,27 +45,6 @@ type HaproxyMgr struct {
 	vhostDefault       string
 	vhostsHTTPS        map[string][]string
 	vhostDefaultHTTPS  string
-}
-
-const (
-	LB_PROXY_PROTOCOL      = "lb-proxy-protocol"
-	LB_ACCEPT_PROXY        = "lb-accept-proxy"
-	LB_VHOST_HTTP          = "lb-vhost"
-	LB_VHOST_DEFAULT_HTTP  = "lb-vhost-default"
-	LB_VHOST_HTTPS         = "lb-vhost-ssl"
-	LB_VHOST_DEFAULT_HTTPS = "lb-vhost-default-ssl"
-)
-
-var (
-	ErrBadExit = errors.New("Bad Process Exit.")
-)
-
-func makeStringArray(s string) []string {
-	if len(s) == 0 {
-		return []string{}
-	} else {
-		return strings.Split(s, ",")
-	}
 }
 
 func (manager *HaproxyMgr) OLD_Apply(apps []*marathon.App, force bool) error {

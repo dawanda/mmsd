@@ -261,6 +261,14 @@ func parseRange(input string) (int, int, error) {
 	return begin, end, err
 }
 
+func makeStringArray(s string) []string {
+	if len(s) == 0 {
+		return []string{}
+	} else {
+		return strings.Split(s, ",")
+	}
+}
+
 // {{{ SortedStrStrKeys
 type sortedStrStrKeys struct {
 	m map[string]string

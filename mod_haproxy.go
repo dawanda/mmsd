@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -15,18 +16,17 @@ import (
 )
 
 const (
-// LB_PROXY_PROTOCOL = "lb-proxy-protocol"
-// LB_ACCEPT_PROXY   = "lb-accept-proxy"
-
-// 	LB_VHOST_HTTP          = "lb-vhost"
-// 	LB_VHOST_DEFAULT_HTTP  = "lb-vhost-default"
-// 	LB_VHOST_HTTPS         = "lb-vhost-ssl"
-// 	LB_VHOST_DEFAULT_HTTPS = "lb-vhost-default-ssl"
+	LB_PROXY_PROTOCOL      = "lb-proxy-protocol"
+	LB_ACCEPT_PROXY        = "lb-accept-proxy"
+	LB_VHOST_HTTP          = "lb-vhost"
+	LB_VHOST_DEFAULT_HTTP  = "lb-vhost-default"
+	LB_VHOST_HTTPS         = "lb-vhost-ssl"
+	LB_VHOST_DEFAULT_HTTPS = "lb-vhost-default-ssl"
 )
 
-// var (
-// 	ErrBadExit = errors.New("Bad Process Exit.")
-// )
+var (
+	ErrBadExit = errors.New("Bad Process Exit.")
+)
 
 type HaproxyModule struct {
 	Verbose           bool   // log verbose logging messages?
@@ -94,6 +94,9 @@ func (module *HaproxyModule) RemoveTask(task AppBackend, app AppCluster) {
 }
 
 func (module *HaproxyModule) makeConfig(app AppCluster) string {
+	module.updateGatewaySettings(app)
+
+	// generate haproxy config fragment
 	result := ""
 	serverOpts := ""
 	bindOpts := ""
@@ -189,6 +192,36 @@ func (module *HaproxyModule) makeConfig(app AppCluster) string {
 	result += "\n"
 
 	return result
+}
+
+func (module *HaproxyModule) updateGatewaySettings(app AppCluster) {
+	// update HTTP virtual hosting
+	var lbVirtualHosts = makeStringArray(app.Labels[LB_VHOST_HTTP])
+	if len(lbVirtualHosts) != 0 {
+		module.vhostsHTTP[app.Id] = lbVirtualHosts
+		if app.Labels[LB_VHOST_DEFAULT_HTTP] == "1" {
+			module.vhostDefaultHTTP = app.Id
+		}
+	} else {
+		delete(module.vhostsHTTP, app.Id)
+		if module.vhostDefaultHTTP == app.Id {
+			module.vhostDefaultHTTP = ""
+		}
+	}
+
+	// update HTTPS virtual hosting
+	lbVirtualHosts = makeStringArray(app.Labels[LB_VHOST_HTTPS])
+	if len(lbVirtualHosts) != 0 {
+		module.vhostsHTTPS[app.Id] = lbVirtualHosts
+		if app.Labels[LB_VHOST_DEFAULT_HTTPS] == "1" {
+			module.vhostDefaultHTTPS = app.Id
+		}
+	} else {
+		delete(module.vhostsHTTPS, app.Id)
+		if module.vhostDefaultHTTPS == app.Id {
+			module.vhostDefaultHTTPS = ""
+		}
+	}
 }
 
 func (module *HaproxyModule) writeConfig() error {
