@@ -45,13 +45,6 @@ import (
 	flag "github.com/ogier/pflag"
 )
 
-type mmsdHandler interface {
-	Setup() error
-	Apply(apps []*marathon.App, force bool) error
-	Update(app *marathon.App, taskID string) error
-	Remove(appID string, taskID string, app *marathon.App) error
-}
-
 type mmsdService struct {
 	HttpApiPort       uint
 	Verbose           bool
@@ -100,7 +93,7 @@ type mmsdService struct {
 	DnsPushSRV  bool
 
 	// runtime state
-	apps         []AppCluster
+	apps         []*AppCluster
 	killingTasks map[string]bool // set of tasks currently in killing state
 }
 
@@ -270,8 +263,8 @@ func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
 }
 
 // convertMarathonApps converts an array of marathon.App into a []AppCluster.
-func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []AppCluster {
-	var apps []AppCluster
+func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*AppCluster {
+	var apps []*AppCluster
 	for _, mApp := range mApps {
 		for portIndex, portDef := range mApp.PortDefinitions {
 			if mmsd.isGroupIncluded(portDef.Labels["lb-group"]) {
@@ -312,7 +305,7 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []AppCluster 
 					labels[k] = v
 				}
 
-				app := AppCluster{
+				app := &AppCluster{
 					Name:        mApp.Id,
 					Id:          PrettifyAppId2(mApp.Id, portIndex),
 					ServicePort: mApp.PortDefinitions[portIndex].Port,
@@ -329,8 +322,8 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []AppCluster 
 	return apps
 }
 
-func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []AppCluster {
-	var apps []AppCluster
+func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []*AppCluster {
+	var apps []*AppCluster
 	for _, app := range mmsd.apps {
 		if app.Name == mAppId {
 			apps = append(apps, app)
@@ -399,10 +392,17 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 		// So we consider thie TASK_RUNNING state as healthy-notice.
 		if len(app.HealthChecks) == 0 {
 			for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
+				// app.Backends = append(app.Backends, AppBackend{
+				// 	Id:    event.TaskId,
+				// 	State: string(event.TaskStatus),
+				// 	Host:  event.Host,
+				// 	Port:  0,
+				// })
+
 				for _, task := range app.Backends {
 					if task.Id == event.TaskId {
 						for _, handler := range mmsd.Handlers {
-							handler.AddTask(task, app)
+							handler.AddTask(&task, app)
 						}
 					}
 				}
@@ -428,7 +428,7 @@ func (mmsd *mmsdService) RemoveTask(appId, taskId string, newStatus marathon.Tas
 			task.State = string(newStatus)
 			if task.Id == taskId {
 				for _, handler := range mmsd.Handlers {
-					handler.RemoveTask(task, app)
+					handler.RemoveTask(&task, app)
 				}
 			}
 		}
@@ -441,9 +441,9 @@ func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusCh
 			if task.Id == event.TaskId {
 				for _, handler := range mmsd.Handlers {
 					if event.Alive {
-						handler.AddTask(task, app)
+						handler.AddTask(&task, app)
 					} else {
-						handler.RemoveTask(task, app)
+						handler.RemoveTask(&task, app)
 					}
 				}
 			}
@@ -518,7 +518,7 @@ func (mmsd *mmsdService) Shutdown() {
 	mmsd.quitChannel <- true
 }
 
-func (mmsd *mmsdService) applyApps(apps []AppCluster) {
+func (mmsd *mmsdService) applyApps(apps []*AppCluster) {
 	mmsd.apps = apps
 
 	for _, handler := range mmsd.Handlers {
@@ -527,7 +527,7 @@ func (mmsd *mmsdService) applyApps(apps []AppCluster) {
 }
 
 func (mmsd *mmsdService) setupHandlers() {
-	mmsd.Handlers = append(mmsd.Handlers, &EventLogger{
+	mmsd.Handlers = append(mmsd.Handlers, &EventLoggerModule{
 		Verbose: true,
 	})
 

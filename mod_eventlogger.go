@@ -6,21 +6,21 @@ import (
 	"log"
 )
 
-/* EventLogger adds simple event logging to the logger.
+/* EventLoggerModule adds simple event logging to the logger.
  */
-type EventLogger struct {
+type EventLoggerModule struct {
 	Verbose bool
 }
 
-func (logger *EventLogger) Startup() {
+func (logger *EventLoggerModule) Startup() {
 	log.Printf("Initialize\n")
 }
 
-func (logger *EventLogger) Shutdown() {
+func (logger *EventLoggerModule) Shutdown() {
 	log.Printf("Shutdown\n")
 }
 
-func (logger *EventLogger) Apply(apps []AppCluster) {
+func (logger *EventLoggerModule) Apply(apps []*AppCluster) {
 	if logger.Verbose {
 		out, err := json.MarshalIndent(apps, "", "  ")
 		if err != nil {
@@ -35,10 +35,10 @@ func (logger *EventLogger) Apply(apps []AppCluster) {
 	}
 }
 
-func (logger *EventLogger) AddTask(task AppBackend, app AppCluster) {
+func (logger *EventLoggerModule) AddTask(task *AppBackend, app *AppCluster) {
 	log.Printf("Task Add: %v: %v %v\n", task.State, app.Id, task.Host)
 }
 
-func (logger *EventLogger) RemoveTask(task AppBackend, app AppCluster) {
+func (logger *EventLoggerModule) RemoveTask(task *AppBackend, app *AppCluster) {
 	log.Printf("Task Remove: %v: %v %v\n", task.State, app.Id, task.Host)
 }

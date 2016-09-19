@@ -4,8 +4,8 @@ type EventListener interface {
 	Startup()
 	Shutdown()
 
-	Apply(apps []AppCluster)
+	Apply(apps []*AppCluster)
 
-	AddTask(task AppBackend, app AppCluster)
-	RemoveTask(task AppBackend, app AppCluster)
+	AddTask(task *AppBackend, app *AppCluster)
+	RemoveTask(task *AppBackend, app *AppCluster)
 }
