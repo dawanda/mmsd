@@ -305,10 +305,11 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*AppCluster
 					labels[k] = v
 				}
 
+				servicePort := mApp.PortDefinitions[portIndex].Port
 				app := &AppCluster{
 					Name:        mApp.Id,
-					Id:          PrettifyAppId2(mApp.Id, portIndex),
-					ServicePort: mApp.PortDefinitions[portIndex].Port,
+					Id:          PrettifyAppId(mApp.Id, portIndex, servicePort),
+					ServicePort: servicePort,
 					Protocol:    mApp.PortDefinitions[portIndex].Protocol,
 					PortName:    mApp.PortDefinitions[portIndex].Name,
 					Labels:      labels,
@@ -527,9 +528,9 @@ func (mmsd *mmsdService) applyApps(apps []*AppCluster) {
 }
 
 func (mmsd *mmsdService) setupHandlers() {
-	mmsd.Handlers = append(mmsd.Handlers, &EventLoggerModule{
-		Verbose: true,
-	})
+	// mmsd.Handlers = append(mmsd.Handlers, &EventLoggerModule{
+	// 	Verbose: true,
+	// })
 
 	// if mmsd.DnsEnabled {
 	// 	mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
@@ -570,12 +571,12 @@ func (mmsd *mmsdService) setupHandlers() {
 		})
 	}
 
-	// if mmsd.FilesEnabled {
-	// 	mmsd.Handlers = append(mmsd.Handlers, &FilesManager{
-	// 		Verbose:  mmsd.Verbose,
-	// 		BasePath: mmsd.RunStateDir + "/confd",
-	// 	})
-	// }
+	if mmsd.FilesEnabled {
+		mmsd.Handlers = append(mmsd.Handlers, &FilesManager{
+			Verbose:  mmsd.Verbose,
+			BasePath: mmsd.RunStateDir + "/confd",
+		})
+	}
 
 	for _, handler := range mmsd.Handlers {
 		handler.Startup()

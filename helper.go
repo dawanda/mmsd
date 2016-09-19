@@ -135,6 +135,22 @@ func FindMissing(slice1, slice2 []string) (missing []string) {
 	return
 }
 
+func GetApplicationProtocol1(app *AppCluster) string {
+	if proto := strings.ToLower(app.Labels["proto"]); len(proto) != 0 {
+		return proto
+	}
+
+	if app.HealthCheck != nil && len(app.HealthCheck.Protocol) != 0 {
+		return strings.ToLower(app.HealthCheck.Protocol)
+	}
+
+	if len(app.Protocol) != 0 {
+		return strings.ToLower(app.Protocol)
+	}
+
+	return "tcp"
+}
+
 func GetApplicationProtocol(app *marathon.App, portIndex int) (proto string) {
 	if proto = strings.ToLower(app.Labels["proto"]); len(proto) != 0 {
 		return
