@@ -61,98 +61,12 @@ var (
 	ErrBadExit = errors.New("Bad Process Exit.")
 )
 
-// {{{ SortedVhostsKeys
-type sortedVhosts struct {
-	m map[string][]string
-	s []string
-}
-
-func (sm *sortedVhosts) Len() int {
-	return len(sm.m)
-}
-
-func (sm *sortedVhosts) Less(a, b int) bool {
-	// return sm.m[sm.s[a]] > sm.m[sm.s[b]]
-	return sm.s[a] < sm.s[b]
-}
-
-func (sm *sortedVhosts) Swap(a, b int) {
-	sm.s[a], sm.s[b] = sm.s[b], sm.s[a]
-}
-
-func SortedVhostsKeys(m map[string][]string) []string {
-	sm := new(sortedVhosts)
-	sm.m = m
-	sm.s = make([]string, len(m))
-
-	i := 0
-	for key, _ := range m {
-		sm.s[i] = key
-		i++
-	}
-	sort.Sort(sm)
-
-	return sm.s
-}
-
-// }}}
-// {{{ SortedStrStrKeys
-type sortedStrStrKeys struct {
-	m map[string]string
-	s []string
-}
-
-func (sm *sortedStrStrKeys) Len() int {
-	return len(sm.m)
-}
-
-func (sm *sortedStrStrKeys) Less(a, b int) bool {
-	// return sm.m[sm.s[a]] > sm.m[sm.s[b]]
-	return sm.s[a] < sm.s[b]
-}
-
-func (sm *sortedStrStrKeys) Swap(a, b int) {
-	sm.s[a], sm.s[b] = sm.s[b], sm.s[a]
-}
-
-func SortedStrStrKeys(m map[string]string) []string {
-	sm := new(sortedStrStrKeys)
-	sm.m = m
-	sm.s = make([]string, len(m))
-
-	i := 0
-	for key, _ := range m {
-		sm.s[i] = key
-		i++
-	}
-	sort.Sort(sm)
-
-	return sm.s
-}
-
-// }}}
-
 func makeStringArray(s string) []string {
 	if len(s) == 0 {
 		return []string{}
 	} else {
 		return strings.Split(s, ",")
 	}
-}
-
-func (manager *HaproxyMgr) Startup() {
-}
-
-func (manager *HaproxyMgr) Shutdown() {
-}
-
-func (manager *HaproxyMgr) Apply(apps []AppCluster) {
-}
-
-func (manager *HaproxyMgr) AddTask(task AppBackend, app AppCluster) {
-}
-
-func (manager *HaproxyMgr) RemoveTask(task AppBackend, app AppCluster) {
 }
 
 func (manager *HaproxyMgr) OLD_Apply(apps []*marathon.App, force bool) error {

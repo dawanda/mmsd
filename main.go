@@ -100,7 +100,8 @@ type mmsdService struct {
 	DnsPushSRV  bool
 
 	// runtime state
-	apps []AppCluster
+	apps         []AppCluster
+	killingTasks map[string]bool // set of tasks currently in killing state
 }
 
 // {{{ HTTP endpoint
@@ -268,6 +269,7 @@ func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
 	return app, nil
 }
 
+// convertMarathonApps converts an array of marathon.App into a []AppCluster.
 func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []AppCluster {
 	var apps []AppCluster
 	for _, mApp := range mApps {
@@ -337,6 +339,7 @@ func (mmsd *mmsdService) setupEventBusListener() {
 
 	sse.OnOpen = mmsd.OnMarathonConnected
 	sse.OnError = mmsd.OnMarathonConnectionFailure
+	//sse.AddEventListener("deployment_info", mmsd.DeploymentStart)
 	sse.AddEventListener("status_update_event", mmsd.StatusUpdateEvent)
 	sse.AddEventListener("health_status_changed_event", mmsd.HealthStatusChangedEvent)
 
@@ -397,14 +400,27 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 				}
 			}
 		}
-	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilling, marathon.TaskKilled, marathon.TaskLost:
+	case marathon.TaskKilling:
 		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
-		for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
-			for _, task := range app.Backends {
-				if task.Id == event.TaskId {
-					for _, handler := range mmsd.Handlers {
-						handler.RemoveTask(task, app)
-					}
+		mmsd.killingTasks[event.TaskId] = true
+		mmsd.RemoveTask(event.AppId, event.TaskId, event.TaskStatus)
+	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
+		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
+		if !mmsd.killingTasks[event.TaskId] {
+			mmsd.RemoveTask(event.AppId, event.TaskId, event.TaskStatus)
+		} else {
+			delete(mmsd.killingTasks, event.TaskId)
+		}
+	}
+}
+
+func (mmsd *mmsdService) RemoveTask(appId, taskId string, newStatus marathon.TaskStatus) {
+	for _, app := range mmsd.findAppsByMarathonId(appId) {
+		for _, task := range app.Backends {
+			task.State = string(newStatus)
+			if task.Id == taskId {
+				for _, handler := range mmsd.Handlers {
+					handler.RemoveTask(task, app)
 				}
 			}
 		}
@@ -527,7 +543,7 @@ func (mmsd *mmsdService) setupHandlers() {
 	// }
 
 	if mmsd.TCPEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, &HaproxyMgr{
+		mmsd.Handlers = append(mmsd.Handlers, &HaproxyModule{
 			Verbose:           mmsd.Verbose,
 			LocalHealthChecks: mmsd.LocalHealthChecks,
 			ServiceAddr:       mmsd.ServiceAddr,
@@ -535,7 +551,7 @@ func (mmsd *mmsdService) setupHandlers() {
 			GatewayAddr:       mmsd.GatewayAddr,
 			GatewayPortHTTP:   mmsd.GatewayPortHTTP,
 			GatewayPortHTTPS:  mmsd.GatewayPortHTTPS,
-			Executable:        mmsd.HaproxyBin,
+			HaproxyExe:        mmsd.HaproxyBin,
 			ConfigTailPath:    mmsd.HaproxyTailCfg,
 			ConfigPath:        filepath.Join(mmsd.RunStateDir, "haproxy.cfg"),
 			OldConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg.old"),
@@ -596,6 +612,7 @@ func main() {
 		DnsBaseName:       "mmsd.",
 		DnsTTL:            time.Second * 5,
 		quitChannel:       make(chan bool),
+		killingTasks:      make(map[string]bool),
 	}
 
 	// trap SIGTERM and SIGINT
