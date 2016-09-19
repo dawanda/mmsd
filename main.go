@@ -33,9 +33,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/dawanda/go-mesos/marathon"
@@ -479,7 +481,13 @@ func (mmsd *mmsdService) Run() {
 
 	<-mmsd.quitChannel
 
-	mmsd.shutdown()
+	for _, handler := range mmsd.Handlers {
+		handler.Shutdown()
+	}
+}
+
+func (mmsd *mmsdService) Shutdown() {
+	mmsd.quitChannel <- true
 }
 
 func (mmsd *mmsdService) applyApps(apps []AppCluster) {
@@ -546,12 +554,6 @@ func (mmsd *mmsdService) setupHandlers() {
 	}
 }
 
-func (mmsd *mmsdService) shutdown() {
-	for _, handler := range mmsd.Handlers {
-		handler.Shutdown()
-	}
-}
-
 func locateExe(name string) string {
 	for _, prefix := range strings.Split(os.Getenv("PATH"), ":") {
 		path := filepath.Join(prefix, name)
@@ -591,6 +593,15 @@ func main() {
 		DnsTTL:            time.Second * 5,
 		quitChannel:       make(chan bool),
 	}
+
+	// trap SIGTERM and SIGINT
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		s := <-sigc
+		log.Printf("Caught signal %v. Terminating", s)
+		mmsd.Shutdown()
+	}()
 
 	mmsd.Run()
 }
