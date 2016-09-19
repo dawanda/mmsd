@@ -304,13 +304,21 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []AppCluster 
 					})
 				}
 
+				labels := make(map[string]string)
+				for k, v := range mApp.Labels {
+					labels[k] = v
+				}
+				for k, v := range mApp.PortDefinitions[portIndex].Labels {
+					labels[k] = v
+				}
+
 				app := AppCluster{
 					Name:        mApp.Id,
 					Id:          PrettifyAppId2(mApp.Id, portIndex),
 					ServicePort: mApp.PortDefinitions[portIndex].Port,
 					Protocol:    mApp.PortDefinitions[portIndex].Protocol,
 					PortName:    mApp.PortDefinitions[portIndex].Name,
-					Labels:      mApp.PortDefinitions[portIndex].Labels,
+					Labels:      labels,
 					HealthCheck: healthCheck,
 					Backends:    backends,
 				}
