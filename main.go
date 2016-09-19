@@ -335,38 +335,42 @@ func (mmsd *mmsdService) setupEventBusListener() {
 
 	var sse = NewEventSource(url, mmsd.ReconnectDelay)
 
-	sse.OnOpen = func(event, data string) {
-		log.Printf("Listening for events from Marathon on %v\n", url)
-
-		mmsd.applyApps(mmsd.convertMarathonApps(mmsd.getMarathonApps()))
-	}
-
-	sse.OnError = func(event, data string) {
-		log.Printf("Marathon Event Stream Error. %v. %v\n", event, data)
-	}
-
-	sse.AddEventListener("status_update_event", func(data string) {
-		var event marathon.StatusUpdateEvent
-		err := json.Unmarshal([]byte(data), &event)
-		if err != nil {
-			log.Printf("Failed to unmarshal status_update_event. %v\n", err)
-			log.Printf("status_update_event: %+v\n", data)
-		} else {
-			mmsd.statusUpdateEvent(&event)
-		}
-	})
-
-	sse.AddEventListener("health_status_changed_event", func(data string) {
-		var event marathon.HealthStatusChangedEvent
-		err := json.Unmarshal([]byte(data), &event)
-		if err != nil {
-			log.Printf("Failed to unmarshal health_status_changed_event. %v\n", err)
-		} else {
-			mmsd.healthStatusChangedEvent(&event)
-		}
-	})
+	sse.OnOpen = mmsd.OnMarathonConnected
+	sse.OnError = mmsd.OnMarathonConnectionFailure
+	sse.AddEventListener("status_update_event", mmsd.StatusUpdateEvent)
+	sse.AddEventListener("health_status_changed_event", mmsd.HealthStatusChangedEvent)
 
 	go sse.RunForever()
+}
+
+func (mmsd *mmsdService) OnMarathonConnected(event, data string) {
+	log.Printf("Listening for events from Marathon on %v:%v\n", mmsd.MarathonIP, mmsd.MarathonPort)
+	mmsd.applyApps(mmsd.convertMarathonApps(mmsd.getMarathonApps()))
+}
+
+func (mmsd *mmsdService) OnMarathonConnectionFailure(event, data string) {
+	log.Printf("Marathon Event Stream Error. %v. %v\n", event, data)
+}
+
+func (mmsd *mmsdService) StatusUpdateEvent(data string) {
+	var event marathon.StatusUpdateEvent
+	err := json.Unmarshal([]byte(data), &event)
+	if err != nil {
+		log.Printf("Failed to unmarshal status_update_event. %v\n", err)
+		log.Printf("status_update_event: %+v\n", data)
+	} else {
+		mmsd.statusUpdateEvent(&event)
+	}
+}
+
+func (mmsd *mmsdService) HealthStatusChangedEvent(data string) {
+	var event marathon.HealthStatusChangedEvent
+	err := json.Unmarshal([]byte(data), &event)
+	if err != nil {
+		log.Printf("Failed to unmarshal health_status_changed_event. %v\n", err)
+	} else {
+		mmsd.healthStatusChangedEvent(&event)
+	}
 }
 
 func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
