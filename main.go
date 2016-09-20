@@ -86,11 +86,11 @@ type mmsdService struct {
 	UDPEnabled bool
 
 	// DNS service discovery
-	DnsEnabled  bool
-	DnsPort     uint
-	DnsBaseName string
-	DnsTTL      time.Duration
-	DnsPushSRV  bool
+	DNSEnabled  bool
+	DNSPort     uint
+	DNSBaseName string
+	DNSTTL      time.Duration
+	DNSPushSRV  bool
 
 	// runtime state
 	apps         []*AppCluster
@@ -498,11 +498,11 @@ func (mmsd *mmsdService) Run() {
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceAddr, "haproxy-bind", mmsd.ServiceAddr, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
-	flag.BoolVar(&mmsd.DnsEnabled, "enable-dns", mmsd.DnsEnabled, "Enables DNS-based service discovery")
-	flag.UintVar(&mmsd.DnsPort, "dns-port", mmsd.DnsPort, "DNS service discovery port")
-	flag.BoolVar(&mmsd.DnsPushSRV, "dns-push-srv", mmsd.DnsPushSRV, "DNS service discovery to also push SRV on A")
-	flag.StringVar(&mmsd.DnsBaseName, "dns-basename", mmsd.DnsBaseName, "DNS service discovery's base name")
-	flag.DurationVar(&mmsd.DnsTTL, "dns-ttl", mmsd.DnsTTL, "DNS service discovery's reply message TTL")
+	flag.BoolVar(&mmsd.DNSEnabled, "enable-dns", mmsd.DNSEnabled, "Enables DNS-based service discovery")
+	flag.UintVar(&mmsd.DNSPort, "dns-port", mmsd.DNSPort, "DNS service discovery port")
+	flag.BoolVar(&mmsd.DNSPushSRV, "dns-push-srv", mmsd.DNSPushSRV, "DNS service discovery to also push SRV on A")
+	flag.StringVar(&mmsd.DNSBaseName, "dns-basename", mmsd.DNSBaseName, "DNS service discovery's base name")
+	flag.DurationVar(&mmsd.DNSTTL, "dns-ttl", mmsd.DNSTTL, "DNS service discovery's reply message TTL")
 	showVersionAndExit := flag.BoolP("version", "V", false, "Shows version and exits")
 
 	flag.Usage = func() {
@@ -549,14 +549,14 @@ func (mmsd *mmsdService) setupHandlers() {
 	// 	Verbose: true,
 	// })
 
-	// if mmsd.DnsEnabled {
+	// if mmsd.DNSEnabled {
 	// 	mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
 	// 		Verbose:     mmsd.Verbose,
 	// 		ServiceAddr: mmsd.ServiceAddr,
-	// 		ServicePort: mmsd.DnsPort,
-	// 		PushSRV:     mmsd.DnsPushSRV,
-	// 		BaseName:    mmsd.DnsBaseName,
-	// 		DnsTTL:      mmsd.DnsTTL,
+	// 		ServicePort: mmsd.DNSPort,
+	// 		PushSRV:     mmsd.DNSPushSRV,
+	// 		BaseName:    mmsd.DNSBaseName,
+	// 		DNSTTL:      mmsd.DNSTTL,
 	// 	})
 	// }
 
@@ -632,11 +632,11 @@ func main() {
 		ServiceAddr:       net.ParseIP("0.0.0.0"),
 		HttpApiPort:       8082,
 		Verbose:           false,
-		DnsEnabled:        false,
-		DnsPort:           53,
-		DnsPushSRV:        false,
-		DnsBaseName:       "mmsd.",
-		DnsTTL:            time.Second * 5,
+		DNSEnabled:        false,
+		DNSPort:           53,
+		DNSPushSRV:        false,
+		DNSBaseName:       "mmsd.",
+		DNSTTL:            time.Second * 5,
 		quitChannel:       make(chan bool),
 		killingTasks:      make(map[string]bool),
 	}
