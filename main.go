@@ -392,14 +392,15 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 		// XXX Only update propagate no health checks have been configured.
 		// So we consider thie TASK_RUNNING state as healthy-notice.
 		if len(app.HealthChecks) == 0 {
+			// for portIndex, port := range event.Ports {
+			// app.Backends = append(app.Backends, AppBackend{
+			// 	Id:    event.TaskId,
+			// 	State: string(event.TaskStatus),
+			// 	Host:  event.Host,
+			// 	Port:  port,
+			// })
+			// }
 			for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
-				// app.Backends = append(app.Backends, AppBackend{
-				// 	Id:    event.TaskId,
-				// 	State: string(event.TaskStatus),
-				// 	Host:  event.Host,
-				// 	Port:  0,
-				// })
-
 				for _, task := range app.Backends {
 					if task.Id == event.TaskId {
 						for _, handler := range mmsd.Handlers {
@@ -443,18 +444,10 @@ func (mmsd *mmsdService) RemoveTask(appId, taskId string, newStatus marathon.Tas
 }
 
 func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusChangedEvent) {
-	for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
-		for _, task := range app.Backends {
-			if task.Id == event.TaskId {
-				for _, handler := range mmsd.Handlers {
-					if event.Alive {
-						handler.AddTask(&task, app)
-					} else {
-						handler.RemoveTask(&task, app)
-					}
-				}
-			}
-		}
+	if event.Alive {
+		// mmsd.AddTask(event.AppId, event.TaskId)
+	} else {
+		// mmsd.RemoveTask(event.AppId, event.TaskId)
 	}
 }
 
