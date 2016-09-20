@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dawanda/mmsd/module_api"
+	"github.com/dawanda/mmsd/core"
 	"github.com/miekg/dns"
 )
 
@@ -41,7 +41,7 @@ type DNSModule struct {
 
 type dbEntry struct {
 	ipAddresses []net.IP
-	app         *module_api.AppCluster
+	app         *core.AppCluster
 }
 
 func (module *DNSModule) Startup() {
@@ -77,7 +77,7 @@ func (module *DNSModule) Shutdown() {
 	module.tcpServer.Shutdown()
 }
 
-func (module *DNSModule) Apply(apps []*module_api.AppCluster) {
+func (module *DNSModule) Apply(apps []*core.AppCluster) {
 	module.dbMutex.Lock()
 	module.db = make(map[string]*dbEntry)
 	module.dbMutex.Unlock()
@@ -89,11 +89,11 @@ func (module *DNSModule) Apply(apps []*module_api.AppCluster) {
 	}
 }
 
-func (module *DNSModule) AddTask(task *module_api.AppBackend, app *module_api.AppCluster) {
+func (module *DNSModule) AddTask(task *core.AppBackend, app *core.AppCluster) {
 	module.update(app)
 }
 
-func (module *DNSModule) update(app *module_api.AppCluster) error {
+func (module *DNSModule) update(app *core.AppCluster) error {
 	var ipAddresses []net.IP
 
 	for _, backend := range app.Backends {
@@ -117,7 +117,7 @@ func (module *DNSModule) update(app *module_api.AppCluster) error {
 	return nil
 }
 
-func (module *DNSModule) RemoveTask(task *module_api.AppBackend, app *module_api.AppCluster) {
+func (module *DNSModule) RemoveTask(task *core.AppBackend, app *core.AppCluster) {
 	module.update(app)
 }
 

@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/dawanda/go-mesos/marathon"
-	"github.com/dawanda/mmsd/module_api"
+	"github.com/dawanda/mmsd/core"
 )
 
 var (
@@ -136,7 +136,7 @@ func FindMissing(slice1, slice2 []string) (missing []string) {
 	return
 }
 
-func GetApplicationProtocol1(app *module_api.AppCluster) string {
+func GetApplicationProtocol1(app *core.AppCluster) string {
 	if proto := strings.ToLower(app.Labels["proto"]); len(proto) != 0 {
 		return proto
 	}

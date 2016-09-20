@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/dawanda/mmsd/module_api"
+	"github.com/dawanda/mmsd/core"
 )
 
 /* EventLoggerModule adds simple event logging to the logger.
@@ -22,7 +22,7 @@ func (logger *EventLoggerModule) Shutdown() {
 	log.Printf("Shutdown\n")
 }
 
-func (logger *EventLoggerModule) Apply(apps []*module_api.AppCluster) {
+func (logger *EventLoggerModule) Apply(apps []*core.AppCluster) {
 	if logger.Verbose {
 		out, err := json.MarshalIndent(apps, "", "  ")
 		if err != nil {
@@ -37,10 +37,10 @@ func (logger *EventLoggerModule) Apply(apps []*module_api.AppCluster) {
 	}
 }
 
-func (logger *EventLoggerModule) AddTask(task *module_api.AppBackend, app *module_api.AppCluster) {
+func (logger *EventLoggerModule) AddTask(task *core.AppBackend, app *core.AppCluster) {
 	log.Printf("Task Add: %v: %v %v\n", task.State, app.Id, task.Host)
 }
 
-func (logger *EventLoggerModule) RemoveTask(task *module_api.AppBackend, app *module_api.AppCluster) {
+func (logger *EventLoggerModule) RemoveTask(task *core.AppBackend, app *core.AppCluster) {
 	log.Printf("Task Remove: %v: %v %v\n", task.State, app.Id, task.Host)
 }

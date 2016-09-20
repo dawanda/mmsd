@@ -41,7 +41,7 @@ import (
 	"time"
 
 	"github.com/dawanda/go-mesos/marathon"
-	"github.com/dawanda/mmsd/module_api"
+	"github.com/dawanda/mmsd/core"
 	"github.com/dawanda/mmsd/modules"
 	"github.com/gorilla/mux"
 	flag "github.com/ogier/pflag"
@@ -95,7 +95,7 @@ type mmsdService struct {
 	DNSPushSRV  bool
 
 	// runtime state
-	apps         []*module_api.AppCluster
+	apps         []*core.AppCluster
 	killingTasks map[string]bool // set of tasks currently in killing state
 }
 
@@ -265,19 +265,19 @@ func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
 }
 
 // convertMarathonApps converts an array of marathon.App into a []AppCluster.
-func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*module_api.AppCluster {
-	var apps []*module_api.AppCluster
+func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*core.AppCluster {
+	var apps []*core.AppCluster
 	for _, mApp := range mApps {
 		for portIndex, portDef := range mApp.PortDefinitions {
 			if mmsd.isGroupIncluded(portDef.Labels["lb-group"]) {
-				var healthCheck *module_api.AppHealthCheck
+				var healthCheck *core.AppHealthCheck
 				if mHealthCheck := FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
 					var mCommand *string
 					if mHealthCheck.Command != nil {
 						mCommand = new(string)
 						*mCommand = mHealthCheck.Command.Value
 					}
-					healthCheck = &module_api.AppHealthCheck{
+					healthCheck = &core.AppHealthCheck{
 						Protocol:               mHealthCheck.Protocol,
 						Path:                   mHealthCheck.Path,
 						Command:                mCommand,
@@ -289,9 +289,9 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*module_api
 					}
 				}
 
-				var backends []module_api.AppBackend
+				var backends []core.AppBackend
 				for _, mTask := range mApp.Tasks {
-					backends = append(backends, module_api.AppBackend{
+					backends = append(backends, core.AppBackend{
 						Id:    mTask.Id,
 						Host:  mTask.Host,
 						Port:  mTask.Ports[portIndex],
@@ -309,7 +309,7 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*module_api
 				}
 
 				servicePort := mApp.PortDefinitions[portIndex].Port
-				app := &module_api.AppCluster{
+				app := &core.AppCluster{
 					Name:        mApp.Id,
 					Id:          PrettifyAppId(mApp.Id, portIndex, servicePort),
 					ServicePort: servicePort,
@@ -327,7 +327,7 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*module_api
 	return apps
 }
 
-func (mmsd *mmsdService) getAppByMarathonId(appId string, portIndex int) *module_api.AppCluster {
+func (mmsd *mmsdService) getAppByMarathonId(appId string, portIndex int) *core.AppCluster {
 	log.Printf("Application %v with port index %v not found.",
 		appId, portIndex)
 	return nil
@@ -335,8 +335,8 @@ func (mmsd *mmsdService) getAppByMarathonId(appId string, portIndex int) *module
 
 // findAppsByMarathonId returns list of all applications that belong to the
 // given Marathon App mAppId.
-func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []*module_api.AppCluster {
-	var apps []*module_api.AppCluster
+func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []*core.AppCluster {
+	var apps []*core.AppCluster
 	for _, app := range mmsd.apps {
 		if app.Name == mAppId {
 			apps = append(apps, app)
@@ -437,7 +437,7 @@ func (mmsd *mmsdService) HealthStatusChangedEvent(data string) {
 func (mmsd *mmsdService) AddTask(appId, taskId, taskStatus, host string, ports []uint) {
 	for portIndex, port := range ports {
 		if app := mmsd.getAppByMarathonId(appId, portIndex); app != nil {
-			task := module_api.AppBackend{
+			task := core.AppBackend{
 				Id:    taskId,
 				Host:  host,
 				Port:  port,
@@ -538,7 +538,7 @@ func (mmsd *mmsdService) Shutdown() {
 	mmsd.quitChannel <- true
 }
 
-func (mmsd *mmsdService) applyApps(apps []*module_api.AppCluster) {
+func (mmsd *mmsdService) applyApps(apps []*core.AppCluster) {
 	mmsd.apps = apps
 
 	for _, handler := range mmsd.Handlers {
