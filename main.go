@@ -65,6 +65,8 @@ type mmsdService struct {
 	// service discovery IP-management
 	ManagedIP net.IP
 
+	EventLoggerEnabled bool
+
 	// file based service discovery
 	FilesEnabled bool
 
@@ -494,6 +496,7 @@ func (mmsd *mmsdService) Run() {
 	flag.IPVar(&mmsd.GatewayAddr, "gateway-bind", mmsd.GatewayAddr, "gateway bind address")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-port-http", mmsd.GatewayPortHTTP, "gateway port for HTTP")
 	flag.UintVar(&mmsd.GatewayPortHTTPS, "gateway-port-https", mmsd.GatewayPortHTTPS, "gateway port for HTTPS")
+	flag.BoolVar(&mmsd.EventLoggerEnabled, "enable-eventlogger", mmsd.EventLoggerEnabled, "enables eventlogger module")
 	flag.BoolVar(&mmsd.FilesEnabled, "enable-files", mmsd.FilesEnabled, "enables file based service discovery")
 	flag.BoolVar(&mmsd.UDPEnabled, "enable-udp", mmsd.UDPEnabled, "enables UDP load balancing")
 	flag.BoolVar(&mmsd.TCPEnabled, "enable-tcp", mmsd.TCPEnabled, "enables haproxy TCP load balancing")
@@ -549,9 +552,11 @@ func (mmsd *mmsdService) applyApps(apps []*core.AppCluster) {
 }
 
 func (mmsd *mmsdService) setupHandlers() {
-	// mmsd.Handlers = append(mmsd.Handlers, &EventLoggerModule{
-	// 	Verbose: true,
-	// })
+	if mmsd.EventLoggerEnabled {
+		mmsd.Handlers = append(mmsd.Handlers, &modules.EventLoggerModule{
+			Verbose: mmsd.Verbose,
+		})
+	}
 
 	if mmsd.DNSEnabled {
 		mmsd.Handlers = append(mmsd.Handlers, &modules.DNSModule{
@@ -616,33 +621,34 @@ func locateExe(name string) string {
 
 func main() {
 	var mmsd = mmsdService{
-		MarathonScheme:    "http",
-		MarathonIP:        net.ParseIP("127.0.0.1"),
-		MarathonPort:      8080,
-		ReconnectDelay:    time.Second * 4,
-		RunStateDir:       "/var/run/mmsd",
-		GatewayEnabled:    false,
-		GatewayAddr:       net.ParseIP("0.0.0.0"),
-		GatewayPortHTTP:   80,
-		GatewayPortHTTPS:  443,
-		FilesEnabled:      false,
-		UDPEnabled:        false,
-		TCPEnabled:        false,
-		LocalHealthChecks: true,
-		HaproxyBin:        locateExe("haproxy"),
-		HaproxyTailCfg:    "/etc/mmsd/haproxy-tail.cfg",
-		HaproxyPort:       8081,
-		ManagementAddr:    net.ParseIP("0.0.0.0"),
-		ServiceAddr:       net.ParseIP("0.0.0.0"),
-		HttpApiPort:       8082,
-		Verbose:           false,
-		DNSEnabled:        false,
-		DNSPort:           53,
-		DNSPushSRV:        false,
-		DNSBaseName:       "mmsd.",
-		DNSTTL:            time.Second * 5,
-		quitChannel:       make(chan bool),
-		killingTasks:      make(map[string]bool),
+		MarathonScheme:     "http",
+		MarathonIP:         net.ParseIP("127.0.0.1"),
+		MarathonPort:       8080,
+		ReconnectDelay:     time.Second * 4,
+		RunStateDir:        "/var/run/mmsd",
+		GatewayEnabled:     false,
+		GatewayAddr:        net.ParseIP("0.0.0.0"),
+		GatewayPortHTTP:    80,
+		GatewayPortHTTPS:   443,
+		EventLoggerEnabled: false,
+		FilesEnabled:       false,
+		UDPEnabled:         false,
+		TCPEnabled:         false,
+		LocalHealthChecks:  true,
+		HaproxyBin:         locateExe("haproxy"),
+		HaproxyTailCfg:     "/etc/mmsd/haproxy-tail.cfg",
+		HaproxyPort:        8081,
+		ManagementAddr:     net.ParseIP("0.0.0.0"),
+		ServiceAddr:        net.ParseIP("0.0.0.0"),
+		HttpApiPort:        8082,
+		Verbose:            false,
+		DNSEnabled:         false,
+		DNSPort:            53,
+		DNSPushSRV:         false,
+		DNSBaseName:        "mmsd.",
+		DNSTTL:             time.Second * 5,
+		quitChannel:        make(chan bool),
+		killingTasks:       make(map[string]bool),
 	}
 
 	// trap SIGTERM and SIGINT
