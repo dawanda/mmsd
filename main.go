@@ -353,15 +353,17 @@ func (mmsd *mmsdService) setupEventBusListener() {
 	var url = fmt.Sprintf("http://%v:%v/v2/events",
 		mmsd.MarathonIP, mmsd.MarathonPort)
 
-	var stream = sse.NewEventSource(url, mmsd.ReconnectDelay)
+	var bus = sse.NewEventSource(url, mmsd.ReconnectDelay)
 
-	stream.OnOpen = mmsd.OnMarathonConnected
-	stream.OnError = mmsd.OnMarathonConnectionFailure
-	//stream.AddEventListener("deployment_info", mmsd.DeploymentStart)
-	stream.AddEventListener("status_update_event", mmsd.StatusUpdateEvent)
-	stream.AddEventListener("health_status_changed_event", mmsd.HealthStatusChangedEvent)
+	bus.OnOpen = mmsd.OnMarathonConnected
+	bus.OnError = mmsd.OnMarathonConnectionFailure
+	//bus.AddEventListener("deployment_info", mmsd.DeploymentStart)
+	//bus.AddEventListener("deployment_success", mmsd.DeploymentSuccess)
+	//bus.AddEventListener("deployment_failed", mmsd.DeploymentFailed)
+	bus.AddEventListener("status_update_event", mmsd.StatusUpdateEvent)
+	bus.AddEventListener("health_status_changed_event", mmsd.HealthStatusChangedEvent)
 
-	go stream.RunForever()
+	go bus.RunForever()
 }
 
 func (mmsd *mmsdService) OnMarathonConnected(event, data string) {
