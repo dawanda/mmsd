@@ -1,4 +1,4 @@
-package main
+package util
 
 import (
 	"bytes"
@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/dawanda/go-mesos/marathon"
-	"github.com/dawanda/mmsd/core"
 )
 
 var (
@@ -136,22 +135,6 @@ func FindMissing(slice1, slice2 []string) (missing []string) {
 	return
 }
 
-func GetApplicationProtocol1(app *core.AppCluster) string {
-	if proto := strings.ToLower(app.Labels["proto"]); len(proto) != 0 {
-		return proto
-	}
-
-	if app.HealthCheck != nil && len(app.HealthCheck.Protocol) != 0 {
-		return strings.ToLower(app.HealthCheck.Protocol)
-	}
-
-	if len(app.Protocol) != 0 {
-		return strings.ToLower(app.Protocol)
-	}
-
-	return "tcp"
-}
-
 func GetApplicationProtocol(app *marathon.App, portIndex int) (proto string) {
 	if proto = strings.ToLower(app.Labels["proto"]); len(proto) != 0 {
 		return
@@ -221,7 +204,7 @@ func Hash(s string) uint32 {
 	return h.Sum32()
 }
 
-func resolveIPAddr(dns string, skip bool) string {
+func ResolveIPAddr(dns string, skip bool) string {
 	if skip {
 		return dns
 	} else {
@@ -234,7 +217,7 @@ func resolveIPAddr(dns string, skip bool) string {
 	}
 }
 
-func parseRange(input string) (int, int, error) {
+func ParseRange(input string) (int, int, error) {
 	if len(input) == 0 {
 		return 0, 0, nil
 	}
@@ -278,7 +261,7 @@ func parseRange(input string) (int, int, error) {
 	return begin, end, err
 }
 
-func makeStringArray(s string) []string {
+func MakeStringArray(s string) []string {
 	if len(s) == 0 {
 		return []string{}
 	} else {

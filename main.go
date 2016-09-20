@@ -43,6 +43,8 @@ import (
 	"github.com/dawanda/go-mesos/marathon"
 	"github.com/dawanda/mmsd/core"
 	"github.com/dawanda/mmsd/modules"
+	"github.com/dawanda/mmsd/sse"
+	"github.com/dawanda/mmsd/util"
 	"github.com/gorilla/mux"
 	flag "github.com/ogier/pflag"
 )
@@ -50,7 +52,7 @@ import (
 type mmsdService struct {
 	HttpApiPort       uint
 	Verbose           bool
-	Handlers          []EventListener
+	Handlers          []core.EventListener
 	quitChannel       chan bool
 	RunStateDir       string
 	FilterGroups      []string
@@ -154,7 +156,7 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	noResolve := r.URL.Query().Get("noresolve") == "1"
 	withServerID := r.URL.Query().Get("withid") == "1"
 
-	portBegin, portEnd, err := parseRange(r.URL.Query().Get("portIndex"))
+	portBegin, portEnd, err := util.ParseRange(r.URL.Query().Get("portIndex"))
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		log.Printf("error parsing range. %v\n", err)
@@ -204,10 +206,10 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	for _, task := range app.Tasks {
 		item := ""
 		if withServerID {
-			item += fmt.Sprintf("%v:", Hash(task.SlaveId))
+			item += fmt.Sprintf("%v:", util.Hash(task.SlaveId))
 		}
 
-		item += resolveIPAddr(task.Host, noResolve)
+		item += util.ResolveIPAddr(task.Host, noResolve)
 
 		for portIndex := portBegin; portIndex <= portEnd; portIndex++ {
 			item += fmt.Sprintf(":%d", task.Ports[portIndex])
@@ -271,7 +273,7 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*core.AppCl
 		for portIndex, portDef := range mApp.PortDefinitions {
 			if mmsd.isGroupIncluded(portDef.Labels["lb-group"]) {
 				var healthCheck *core.AppHealthCheck
-				if mHealthCheck := FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
+				if mHealthCheck := util.FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
 					var mCommand *string
 					if mHealthCheck.Command != nil {
 						mCommand = new(string)
@@ -311,7 +313,7 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*core.AppCl
 				servicePort := mApp.PortDefinitions[portIndex].Port
 				app := &core.AppCluster{
 					Name:        mApp.Id,
-					Id:          PrettifyAppId(mApp.Id, portIndex, servicePort),
+					Id:          util.PrettifyAppId(mApp.Id, portIndex, servicePort),
 					ServicePort: servicePort,
 					Protocol:    mApp.PortDefinitions[portIndex].Protocol,
 					PortName:    mApp.PortDefinitions[portIndex].Name,
@@ -349,15 +351,15 @@ func (mmsd *mmsdService) setupEventBusListener() {
 	var url = fmt.Sprintf("http://%v:%v/v2/events",
 		mmsd.MarathonIP, mmsd.MarathonPort)
 
-	var sse = NewEventSource(url, mmsd.ReconnectDelay)
+	var stream = sse.NewEventSource(url, mmsd.ReconnectDelay)
 
-	sse.OnOpen = mmsd.OnMarathonConnected
-	sse.OnError = mmsd.OnMarathonConnectionFailure
-	//sse.AddEventListener("deployment_info", mmsd.DeploymentStart)
-	sse.AddEventListener("status_update_event", mmsd.StatusUpdateEvent)
-	sse.AddEventListener("health_status_changed_event", mmsd.HealthStatusChangedEvent)
+	stream.OnOpen = mmsd.OnMarathonConnected
+	stream.OnError = mmsd.OnMarathonConnectionFailure
+	//stream.AddEventListener("deployment_info", mmsd.DeploymentStart)
+	stream.AddEventListener("status_update_event", mmsd.StatusUpdateEvent)
+	stream.AddEventListener("health_status_changed_event", mmsd.HealthStatusChangedEvent)
 
-	go sse.RunForever()
+	go stream.RunForever()
 }
 
 func (mmsd *mmsdService) OnMarathonConnected(event, data string) {
@@ -571,7 +573,7 @@ func (mmsd *mmsdService) setupHandlers() {
 	// }
 
 	if mmsd.TCPEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, &HaproxyModule{
+		mmsd.Handlers = append(mmsd.Handlers, &modules.HaproxyModule{
 			Verbose:           mmsd.Verbose,
 			LocalHealthChecks: mmsd.LocalHealthChecks,
 			ServiceAddr:       mmsd.ServiceAddr,
@@ -591,7 +593,7 @@ func (mmsd *mmsdService) setupHandlers() {
 	}
 
 	if mmsd.FilesEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, &FilesManager{
+		mmsd.Handlers = append(mmsd.Handlers, &modules.FilesManager{
 			Verbose:  mmsd.Verbose,
 			BasePath: mmsd.RunStateDir + "/confd",
 		})

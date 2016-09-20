@@ -1,4 +1,4 @@
-package main
+package modules
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/dawanda/go-mesos/marathon"
 	"github.com/dawanda/mmsd/udpproxy"
+	"github.com/dawanda/mmsd/util"
 )
 
 type UdpManager struct {
@@ -43,7 +44,7 @@ func (manager *UdpManager) Apply(apps []*marathon.App, force bool) error {
 
 func (manager *UdpManager) GetFrontend(app *marathon.App, portIndex int, replace bool) (*udpproxy.Frontend, error) {
 	servicePort := app.PortDefinitions[portIndex].Port
-	name := PrettifyAppId(app.Id, portIndex, servicePort)
+	name := util.PrettifyAppId(app.Id, portIndex, servicePort)
 
 	server, ok := manager.Servers[name]
 	if ok {
@@ -91,7 +92,7 @@ func (manager *UdpManager) removeApp(appID string) error {
 
 func (manager *UdpManager) applyApp(app *marathon.App) error {
 	for portIndex := range app.Ports {
-		if GetTransportProtocol(app, portIndex) == "udp" {
+		if util.GetTransportProtocol(app, portIndex) == "udp" {
 			fe, err := manager.GetFrontend(app, portIndex, true)
 			if err != nil {
 				log.Printf("Error spawning UDP frontend. %v\n", err)

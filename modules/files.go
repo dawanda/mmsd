@@ -1,4 +1,4 @@
-package main
+package modules
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dawanda/mmsd/core"
+	"github.com/dawanda/mmsd/util"
 )
 
 type FilesManager struct {
@@ -61,7 +62,7 @@ func (upstream *FilesManager) Apply(apps []*core.AppCluster) {
 	}
 
 	// check for superfluous files
-	diff := FindMissing(oldFiles, newFiles)
+	diff := util.FindMissing(oldFiles, newFiles)
 	for _, superfluous := range diff {
 		upstream.Log(fmt.Sprintf("Removing superfluous file: %v\n", superfluous))
 		os.Remove(superfluous)
@@ -84,7 +85,7 @@ func (upstream *FilesManager) writeApp(app *core.AppCluster) ([]string, error) {
 	if _, err := os.Stat(cfgfile); os.IsNotExist(err) {
 		upstream.Log(fmt.Sprintf("new %v", cfgfile))
 		os.Rename(tmpfile, cfgfile)
-	} else if !FileIsIdentical(tmpfile, cfgfile) {
+	} else if !util.FileIsIdentical(tmpfile, cfgfile) {
 		upstream.Log(fmt.Sprintf("refresh %v", cfgfile))
 		os.Rename(tmpfile, cfgfile)
 	} else {
@@ -94,6 +95,22 @@ func (upstream *FilesManager) writeApp(app *core.AppCluster) ([]string, error) {
 	return files, nil
 }
 
+func getApplicationProtocol1(app *core.AppCluster) string {
+	if proto := strings.ToLower(app.Labels["proto"]); len(proto) != 0 {
+		return proto
+	}
+
+	if app.HealthCheck != nil && len(app.HealthCheck.Protocol) != 0 {
+		return strings.ToLower(app.HealthCheck.Protocol)
+	}
+
+	if len(app.Protocol) != 0 {
+		return strings.ToLower(app.Protocol)
+	}
+
+	return "tcp"
+}
+
 func (upstream *FilesManager) writeFile(filename string, appId string,
 	app *core.AppCluster) error {
 
@@ -101,7 +118,7 @@ func (upstream *FilesManager) writeFile(filename string, appId string,
 	b.WriteString(fmt.Sprintf("Service-Name: %v\r\n", appId))
 	b.WriteString(fmt.Sprintf("Service-Port: %v\r\n", app.ServicePort))
 	b.WriteString(fmt.Sprintf("Service-Transport-Proto: %v\r\n", app.Protocol))
-	b.WriteString(fmt.Sprintf("Service-Application-Proto: %v\r\n", GetApplicationProtocol1(app)))
+	b.WriteString(fmt.Sprintf("Service-Application-Proto: %v\r\n", getApplicationProtocol1(app)))
 	if app.HealthCheck != nil && len(app.HealthCheck.Protocol) != 0 {
 		b.WriteString(fmt.Sprintf("Health-Check-Proto: %v\r\n", strings.ToLower(app.HealthCheck.Protocol)))
 	}

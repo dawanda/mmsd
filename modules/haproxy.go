@@ -1,4 +1,4 @@
-package main
+package modules
 
 import (
 	"errors"
@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/dawanda/mmsd/core"
+	"github.com/dawanda/mmsd/util"
 )
 
 const (
@@ -117,7 +118,7 @@ func (module *HaproxyModule) makeConfig(app *core.AppCluster) string {
 		bindOpts += " defer-accept"
 	}
 
-	if Atoi(app.Labels[LB_ACCEPT_PROXY], 0) != 0 {
+	if util.Atoi(app.Labels[LB_ACCEPT_PROXY], 0) != 0 {
 		bindOpts += " accept-proxy"
 	}
 
@@ -129,7 +130,7 @@ func (module *HaproxyModule) makeConfig(app *core.AppCluster) string {
 		serverOpts += fmt.Sprintf(" inter %v", app.HealthCheck.IntervalSeconds*1000)
 	}
 
-	switch Atoi(app.Labels[LB_PROXY_PROTOCOL], 0) {
+	switch util.Atoi(app.Labels[LB_PROXY_PROTOCOL], 0) {
 	case 2:
 		serverOpts += " send-proxy-v2"
 	case 1:
@@ -141,7 +142,7 @@ func (module *HaproxyModule) makeConfig(app *core.AppCluster) string {
 			app.Id, app.Labels["lb-proxy-protocol"])
 	}
 
-	switch Atoi(app.Labels[LB_PROXY_PROTOCOL], 0) {
+	switch util.Atoi(app.Labels[LB_PROXY_PROTOCOL], 0) {
 	case 2:
 		serverOpts += " send-proxy-v2"
 	case 1:
@@ -193,7 +194,7 @@ func (module *HaproxyModule) makeConfig(app *core.AppCluster) string {
 			result += fmt.Sprintf(
 				"  server %v:%v %v:%v%v\n",
 				task.Host, task.Port, // taskLabel == "$host:$port"
-				SoftResolveIPAddr(task.Host),
+				util.SoftResolveIPAddr(task.Host),
 				task.Port,
 				serverOpts)
 		} else {
@@ -208,7 +209,7 @@ func (module *HaproxyModule) makeConfig(app *core.AppCluster) string {
 
 func (module *HaproxyModule) updateGatewaySettings(app *core.AppCluster) {
 	// update HTTP virtual hosting
-	var lbVirtualHosts = makeStringArray(app.Labels[LB_VHOST_HTTP])
+	var lbVirtualHosts = util.MakeStringArray(app.Labels[LB_VHOST_HTTP])
 	if len(lbVirtualHosts) != 0 {
 		module.vhostsHTTP[app.Id] = lbVirtualHosts
 		if app.Labels[LB_VHOST_DEFAULT_HTTP] == "1" {
@@ -222,7 +223,7 @@ func (module *HaproxyModule) updateGatewaySettings(app *core.AppCluster) {
 	}
 
 	// update HTTPS virtual hosting
-	lbVirtualHosts = makeStringArray(app.Labels[LB_VHOST_HTTPS])
+	lbVirtualHosts = util.MakeStringArray(app.Labels[LB_VHOST_HTTPS])
 	if len(lbVirtualHosts) != 0 {
 		module.vhostsHTTPS[app.Id] = lbVirtualHosts
 		if app.Labels[LB_VHOST_DEFAULT_HTTPS] == "1" {
@@ -367,12 +368,12 @@ func (module *HaproxyModule) makeGatewayHTTP() string {
 		fragment += "\n"
 	}
 
-	for _, acl := range SortedStrStrKeys(exactRoutes) {
+	for _, acl := range util.SortedStrStrKeys(exactRoutes) {
 		appID := exactRoutes[acl]
 		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
 	}
 
-	for _, acl := range SortedStrStrKeys(suffixRoutes) {
+	for _, acl := range util.SortedStrStrKeys(suffixRoutes) {
 		appID := suffixRoutes[acl]
 		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
 	}
@@ -438,12 +439,12 @@ func (module *HaproxyModule) makeGatewayHTTPS() string {
 		fragment += "\n"
 	}
 
-	for _, acl := range SortedStrStrKeys(exactRoutes) {
+	for _, acl := range util.SortedStrStrKeys(exactRoutes) {
 		appID := exactRoutes[acl]
 		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
 	}
 
-	for _, acl := range SortedStrStrKeys(suffixRoutes) {
+	for _, acl := range util.SortedStrStrKeys(suffixRoutes) {
 		appID := suffixRoutes[acl]
 		fragment += fmt.Sprintf("  use_backend %v if %v\n", appID, acl)
 	}
@@ -472,7 +473,7 @@ func (module *HaproxyModule) makeConfigTail() string {
 }
 
 func (module *HaproxyModule) reloadConfig() error {
-	if FileIsIdentical(module.ConfigPath, module.OldConfigPath) {
+	if util.FileIsIdentical(module.ConfigPath, module.OldConfigPath) {
 		log.Printf("[haproxy] config file not changed. ignoring reload\n")
 		return nil
 	}
