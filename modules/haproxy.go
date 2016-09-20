@@ -57,8 +57,6 @@ type HaproxyModule struct {
 }
 
 func (module *HaproxyModule) Startup() {
-	log.Printf("Haproxy starting")
-
 	module.vhostsHTTP = make(map[string][]string)
 	module.vhostDefaultHTTP = ""
 
@@ -69,18 +67,19 @@ func (module *HaproxyModule) Startup() {
 }
 
 func (module *HaproxyModule) Shutdown() {
-	log.Printf("Haproxy shutting down")
 }
 
 func (module *HaproxyModule) Apply(apps []*core.AppCluster) {
-	log.Printf("Haproxy: apply([]AppCluster)")
-
 	for _, app := range apps {
 		if module.supportsProtocol(app.Protocol) {
 			module.appConfigCache[app.Id] = module.makeConfig(app)
 		}
 	}
 
+	module.Commit()
+}
+
+func (module *HaproxyModule) Commit() {
 	err := module.writeConfig()
 	if err != nil {
 		log.Printf("Failed to write config. %v", err)
