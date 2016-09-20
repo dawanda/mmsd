@@ -99,8 +99,9 @@ type mmsdService struct {
 	DNSPushSRV  bool
 
 	// runtime state
-	apps         []*core.AppCluster
-	killingTasks map[string]bool // set of tasks currently in killing state
+	apps         []*core.AppCluster                    // cache of latest state of all app clusters
+	taskEvents   map[string]marathon.StatusUpdateEvent // map of last task status update events
+	killingTasks map[string]bool                       // set of tasks currently in killing state
 }
 
 // {{{ HTTP endpoint
@@ -408,8 +409,9 @@ func (mmsd *mmsdService) StatusUpdateEvent(data string) {
 				event.Host,
 				event.Ports)
 		} else {
-			// TODO: add to mmsd.unhealthyTasks[] to remember host:port mappings
-			// for the moment when this task becomes live
+			// Remember the update event so as soon as the task becomes healthy,
+			// we can send a full AddTask() event to the handlers.
+			mmsd.taskEvents[event.TaskId] = event
 		}
 	case marathon.TaskKilling:
 		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
@@ -417,6 +419,7 @@ func (mmsd *mmsdService) StatusUpdateEvent(data string) {
 		mmsd.RemoveTask(event.AppId, event.TaskId, event.TaskStatus)
 	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
 		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
+		delete(mmsd.taskEvents, event.TaskId)
 		if !mmsd.killingTasks[event.TaskId] {
 			mmsd.RemoveTask(event.AppId, event.TaskId, event.TaskStatus)
 		} else {
@@ -432,7 +435,11 @@ func (mmsd *mmsdService) HealthStatusChangedEvent(data string) {
 	if err != nil {
 		log.Printf("Failed to unmarshal health_status_changed_event. %v\n", err)
 	} else if event.Alive {
-		// TODO mmsd.AddTask(event.AppId, event.TaskId)
+		if taskUpdateEvent, ok := mmsd.taskEvents[event.TaskId]; ok {
+			log.Printf("taskUpdateEvent: %+v", taskUpdateEvent)
+			// TODO: fee mmsd.apps[appIds] with tasks
+			// TODO mmsd.AddTask(event.AppId, event.TaskId)
+		}
 	} else {
 		mmsd.RemoveTask(event.AppId, event.TaskId, "TASK_RUNNING")
 	}
@@ -650,6 +657,7 @@ func main() {
 		DNSBaseName:        "mmsd.",
 		DNSTTL:             time.Second * 5,
 		quitChannel:        make(chan bool),
+		taskEvents:         make(map[string]marathon.StatusUpdateEvent),
 		killingTasks:       make(map[string]bool),
 	}
 
