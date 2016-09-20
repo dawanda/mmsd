@@ -296,6 +296,7 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*AppCluster
 						State: string(*mTask.State),
 					})
 				}
+				// TODO: sort backends ASC
 
 				labels := make(map[string]string)
 				for k, v := range mApp.Labels {
@@ -315,6 +316,7 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*AppCluster
 					Labels:      labels,
 					HealthCheck: healthCheck,
 					Backends:    backends,
+					PortIndex:   portIndex,
 				}
 				apps = append(apps, app)
 			}
@@ -323,6 +325,14 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*AppCluster
 	return apps
 }
 
+func (mmsd *mmsdService) getAppByMarathonId(appId string, portIndex int) *AppCluster {
+	log.Printf("Application %v with port index %v not found.",
+		appId, portIndex)
+	return nil
+}
+
+// findAppsByMarathonId returns list of all applications that belong to the
+// given Marathon App mAppId.
 func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []*AppCluster {
 	var apps []*AppCluster
 	for _, app := range mmsd.apps {
@@ -357,28 +367,16 @@ func (mmsd *mmsdService) OnMarathonConnectionFailure(event, data string) {
 	log.Printf("Marathon Event Stream Error. %v. %v\n", event, data)
 }
 
+// StatusUpdateEvent is invoked by SSE when exactly this named event is fired.
 func (mmsd *mmsdService) StatusUpdateEvent(data string) {
 	var event marathon.StatusUpdateEvent
 	err := json.Unmarshal([]byte(data), &event)
 	if err != nil {
 		log.Printf("Failed to unmarshal status_update_event. %v\n", err)
 		log.Printf("status_update_event: %+v\n", data)
-	} else {
-		mmsd.statusUpdateEvent(&event)
+		return
 	}
-}
 
-func (mmsd *mmsdService) HealthStatusChangedEvent(data string) {
-	var event marathon.HealthStatusChangedEvent
-	err := json.Unmarshal([]byte(data), &event)
-	if err != nil {
-		log.Printf("Failed to unmarshal health_status_changed_event. %v\n", err)
-	} else {
-		mmsd.healthStatusChangedEvent(&event)
-	}
-}
-
-func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 	switch event.TaskStatus {
 	case marathon.TaskRunning:
 		app, err := mmsd.getMarathonApp(event.AppId)
@@ -387,28 +385,23 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 				event.AppId, event.TaskId, event.Host, err)
 			return
 		}
-		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
+
+		log.Printf(
+			"App %v task %v on %v changed status. %v. %v\n",
+			event.AppId, event.TaskId, event.Host, event.TaskStatus, event.Message)
 
 		// XXX Only update propagate no health checks have been configured.
 		// So we consider thie TASK_RUNNING state as healthy-notice.
 		if len(app.HealthChecks) == 0 {
-			// for portIndex, port := range event.Ports {
-			// app.Backends = append(app.Backends, AppBackend{
-			// 	Id:    event.TaskId,
-			// 	State: string(event.TaskStatus),
-			// 	Host:  event.Host,
-			// 	Port:  port,
-			// })
-			// }
-			for _, app := range mmsd.findAppsByMarathonId(event.AppId) {
-				for _, task := range app.Backends {
-					if task.Id == event.TaskId {
-						for _, handler := range mmsd.Handlers {
-							handler.AddTask(&task, app)
-						}
-					}
-				}
-			}
+			mmsd.AddTask(
+				event.AppId,
+				event.TaskId,
+				string(event.TaskStatus),
+				event.Host,
+				event.Ports)
+		} else {
+			// TODO: add to mmsd.unhealthyTasks[] to remember host:port mappings
+			// for the moment when this task becomes live
 		}
 	case marathon.TaskKilling:
 		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
@@ -424,7 +417,41 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 	}
 }
 
+// HealthStatusChangedEvent is invoked by SSE when exactly this named event is fired.
+func (mmsd *mmsdService) HealthStatusChangedEvent(data string) {
+	var event marathon.HealthStatusChangedEvent
+	err := json.Unmarshal([]byte(data), &event)
+	if err != nil {
+		log.Printf("Failed to unmarshal health_status_changed_event. %v\n", err)
+	} else if event.Alive {
+		// TODO mmsd.AddTask(event.AppId, event.TaskId)
+	} else {
+		mmsd.RemoveTask(event.AppId, event.TaskId, "TASK_RUNNING")
+	}
+}
+
+// AddTask ensures the given task is added to the app and all handlers are
+// notified as well.
+func (mmsd *mmsdService) AddTask(appId, taskId, taskStatus, host string, ports []uint) {
+	for portIndex, port := range ports {
+		if app := mmsd.getAppByMarathonId(appId, portIndex); app != nil {
+			task := AppBackend{
+				Id:    taskId,
+				Host:  host,
+				Port:  port,
+				State: string(taskStatus),
+			}
+			app.Backends = append(app.Backends, task)
+
+			for _, handler := range mmsd.Handlers {
+				handler.AddTask(&task, app)
+			}
+		}
+	}
+}
+
 func (mmsd *mmsdService) RemoveTask(appId, taskId string, newStatus marathon.TaskStatus) bool {
+	var found uint
 	for _, app := range mmsd.findAppsByMarathonId(appId) {
 		for i, task := range app.Backends {
 			if task.Id == taskId {
@@ -435,20 +462,11 @@ func (mmsd *mmsdService) RemoveTask(appId, taskId string, newStatus marathon.Tas
 				for _, handler := range mmsd.Handlers {
 					handler.RemoveTask(&task, app)
 				}
-
-				return true
+				found++
 			}
 		}
 	}
-	return false
-}
-
-func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusChangedEvent) {
-	if event.Alive {
-		// mmsd.AddTask(event.AppId, event.TaskId)
-	} else {
-		// mmsd.RemoveTask(event.AppId, event.TaskId)
-	}
+	return found > 0
 }
 
 const appVersion = "0.9.12"
@@ -603,9 +621,9 @@ func main() {
 		GatewayAddr:       net.ParseIP("0.0.0.0"),
 		GatewayPortHTTP:   80,
 		GatewayPortHTTPS:  443,
-		FilesEnabled:      true,
-		UDPEnabled:        true,
-		TCPEnabled:        true,
+		FilesEnabled:      false,
+		UDPEnabled:        false,
+		TCPEnabled:        false,
 		LocalHealthChecks: true,
 		HaproxyBin:        locateExe("haproxy"),
 		HaproxyTailCfg:    "/etc/mmsd/haproxy-tail.cfg",
