@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/dawanda/mmsd/module_api"
 )
 
 type FilesManager struct {
@@ -27,7 +29,7 @@ func (manager *FilesManager) Startup() {
 func (manager *FilesManager) Shutdown() {
 }
 
-func (manager *FilesManager) RemoveTask(task *AppBackend, app *AppCluster) {
+func (manager *FilesManager) RemoveTask(task *module_api.AppBackend, app *module_api.AppCluster) {
 	if app != nil {
 		manager.writeApp(app)
 	} else {
@@ -35,11 +37,11 @@ func (manager *FilesManager) RemoveTask(task *AppBackend, app *AppCluster) {
 	}
 }
 
-func (upstream *FilesManager) AddTask(task *AppBackend, app *AppCluster) {
+func (upstream *FilesManager) AddTask(task *module_api.AppBackend, app *module_api.AppCluster) {
 	upstream.writeApp(app)
 }
 
-func (upstream *FilesManager) Apply(apps []*AppCluster) {
+func (upstream *FilesManager) Apply(apps []*module_api.AppCluster) {
 	err := os.MkdirAll(upstream.BasePath, 0770)
 	if err != nil {
 		log.Printf("Failed to mkdir. %v", err)
@@ -66,7 +68,7 @@ func (upstream *FilesManager) Apply(apps []*AppCluster) {
 	}
 }
 
-func (upstream *FilesManager) writeApp(app *AppCluster) ([]string, error) {
+func (upstream *FilesManager) writeApp(app *module_api.AppCluster) ([]string, error) {
 	var files []string
 
 	app_id := app.Id
@@ -93,7 +95,7 @@ func (upstream *FilesManager) writeApp(app *AppCluster) ([]string, error) {
 }
 
 func (upstream *FilesManager) writeFile(filename string, appId string,
-	app *AppCluster) error {
+	app *module_api.AppCluster) error {
 
 	var b bytes.Buffer
 	b.WriteString(fmt.Sprintf("Service-Name: %v\r\n", appId))

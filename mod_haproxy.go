@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/dawanda/mmsd/module_api"
 )
 
 const (
@@ -69,7 +71,7 @@ func (module *HaproxyModule) Shutdown() {
 	log.Printf("Haproxy shutting down")
 }
 
-func (module *HaproxyModule) Apply(apps []*AppCluster) {
+func (module *HaproxyModule) Apply(apps []*module_api.AppCluster) {
 	log.Printf("Haproxy: apply([]AppCluster)")
 
 	for _, app := range apps {
@@ -90,7 +92,7 @@ func (module *HaproxyModule) Apply(apps []*AppCluster) {
 	}
 }
 
-func (module *HaproxyModule) AddTask(task *AppBackend, app *AppCluster) {
+func (module *HaproxyModule) AddTask(task *module_api.AppBackend, app *module_api.AppCluster) {
 	if !module.supportsProtocol(app.Protocol) {
 		return
 	}
@@ -98,12 +100,12 @@ func (module *HaproxyModule) AddTask(task *AppBackend, app *AppCluster) {
 	// TODO
 }
 
-func (module *HaproxyModule) RemoveTask(task *AppBackend, app *AppCluster) {
+func (module *HaproxyModule) RemoveTask(task *module_api.AppBackend, app *module_api.AppCluster) {
 	log.Printf("Haproxy: RemoveTask()")
 	// TODO
 }
 
-func (module *HaproxyModule) makeConfig(app *AppCluster) string {
+func (module *HaproxyModule) makeConfig(app *module_api.AppCluster) string {
 	module.updateGatewaySettings(app)
 
 	// generate haproxy config fragment
@@ -204,7 +206,7 @@ func (module *HaproxyModule) makeConfig(app *AppCluster) string {
 	return result
 }
 
-func (module *HaproxyModule) updateGatewaySettings(app *AppCluster) {
+func (module *HaproxyModule) updateGatewaySettings(app *module_api.AppCluster) {
 	// update HTTP virtual hosting
 	var lbVirtualHosts = makeStringArray(app.Labels[LB_VHOST_HTTP])
 	if len(lbVirtualHosts) != 0 {
@@ -530,7 +532,7 @@ func (module *HaproxyModule) exec(logMessage string, args ...string) error {
 	return err
 }
 
-func (module *HaproxyModule) getAppProtocol(app *AppCluster) string {
+func (module *HaproxyModule) getAppProtocol(app *module_api.AppCluster) string {
 	if app.HealthCheck != nil {
 		if app.HealthCheck.Protocol != "COMMAND" {
 			return strings.ToUpper(app.HealthCheck.Protocol)

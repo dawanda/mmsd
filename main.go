@@ -41,6 +41,8 @@ import (
 	"time"
 
 	"github.com/dawanda/go-mesos/marathon"
+	"github.com/dawanda/mmsd/module_api"
+	"github.com/dawanda/mmsd/modules"
 	"github.com/gorilla/mux"
 	flag "github.com/ogier/pflag"
 )
@@ -93,7 +95,7 @@ type mmsdService struct {
 	DNSPushSRV  bool
 
 	// runtime state
-	apps         []*AppCluster
+	apps         []*module_api.AppCluster
 	killingTasks map[string]bool // set of tasks currently in killing state
 }
 
@@ -263,19 +265,19 @@ func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
 }
 
 // convertMarathonApps converts an array of marathon.App into a []AppCluster.
-func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*AppCluster {
-	var apps []*AppCluster
+func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*module_api.AppCluster {
+	var apps []*module_api.AppCluster
 	for _, mApp := range mApps {
 		for portIndex, portDef := range mApp.PortDefinitions {
 			if mmsd.isGroupIncluded(portDef.Labels["lb-group"]) {
-				var healthCheck *AppHealthCheck
+				var healthCheck *module_api.AppHealthCheck
 				if mHealthCheck := FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
 					var mCommand *string
 					if mHealthCheck.Command != nil {
 						mCommand = new(string)
 						*mCommand = mHealthCheck.Command.Value
 					}
-					healthCheck = &AppHealthCheck{
+					healthCheck = &module_api.AppHealthCheck{
 						Protocol:               mHealthCheck.Protocol,
 						Path:                   mHealthCheck.Path,
 						Command:                mCommand,
@@ -287,9 +289,9 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*AppCluster
 					}
 				}
 
-				var backends []AppBackend
+				var backends []module_api.AppBackend
 				for _, mTask := range mApp.Tasks {
-					backends = append(backends, AppBackend{
+					backends = append(backends, module_api.AppBackend{
 						Id:    mTask.Id,
 						Host:  mTask.Host,
 						Port:  mTask.Ports[portIndex],
@@ -307,7 +309,7 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*AppCluster
 				}
 
 				servicePort := mApp.PortDefinitions[portIndex].Port
-				app := &AppCluster{
+				app := &module_api.AppCluster{
 					Name:        mApp.Id,
 					Id:          PrettifyAppId(mApp.Id, portIndex, servicePort),
 					ServicePort: servicePort,
@@ -325,7 +327,7 @@ func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*AppCluster
 	return apps
 }
 
-func (mmsd *mmsdService) getAppByMarathonId(appId string, portIndex int) *AppCluster {
+func (mmsd *mmsdService) getAppByMarathonId(appId string, portIndex int) *module_api.AppCluster {
 	log.Printf("Application %v with port index %v not found.",
 		appId, portIndex)
 	return nil
@@ -333,8 +335,8 @@ func (mmsd *mmsdService) getAppByMarathonId(appId string, portIndex int) *AppClu
 
 // findAppsByMarathonId returns list of all applications that belong to the
 // given Marathon App mAppId.
-func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []*AppCluster {
-	var apps []*AppCluster
+func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []*module_api.AppCluster {
+	var apps []*module_api.AppCluster
 	for _, app := range mmsd.apps {
 		if app.Name == mAppId {
 			apps = append(apps, app)
@@ -435,7 +437,7 @@ func (mmsd *mmsdService) HealthStatusChangedEvent(data string) {
 func (mmsd *mmsdService) AddTask(appId, taskId, taskStatus, host string, ports []uint) {
 	for portIndex, port := range ports {
 		if app := mmsd.getAppByMarathonId(appId, portIndex); app != nil {
-			task := AppBackend{
+			task := module_api.AppBackend{
 				Id:    taskId,
 				Host:  host,
 				Port:  port,
@@ -536,7 +538,7 @@ func (mmsd *mmsdService) Shutdown() {
 	mmsd.quitChannel <- true
 }
 
-func (mmsd *mmsdService) applyApps(apps []*AppCluster) {
+func (mmsd *mmsdService) applyApps(apps []*module_api.AppCluster) {
 	mmsd.apps = apps
 
 	for _, handler := range mmsd.Handlers {
@@ -549,16 +551,16 @@ func (mmsd *mmsdService) setupHandlers() {
 	// 	Verbose: true,
 	// })
 
-	// if mmsd.DNSEnabled {
-	// 	mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
-	// 		Verbose:     mmsd.Verbose,
-	// 		ServiceAddr: mmsd.ServiceAddr,
-	// 		ServicePort: mmsd.DNSPort,
-	// 		PushSRV:     mmsd.DNSPushSRV,
-	// 		BaseName:    mmsd.DNSBaseName,
-	// 		DNSTTL:      mmsd.DNSTTL,
-	// 	})
-	// }
+	if mmsd.DNSEnabled {
+		mmsd.Handlers = append(mmsd.Handlers, &modules.DNSModule{
+			Verbose:     mmsd.Verbose,
+			ServiceAddr: mmsd.ServiceAddr,
+			ServicePort: mmsd.DNSPort,
+			PushSRV:     mmsd.DNSPushSRV,
+			BaseName:    mmsd.DNSBaseName,
+			DNSTTL:      mmsd.DNSTTL,
+		})
+	}
 
 	// if mmsd.UDPEnabled {
 	// 	mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(

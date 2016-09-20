@@ -1,4 +1,4 @@
-package main
+package module_api
 
 // Marathon independant application definitions
 
