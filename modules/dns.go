@@ -45,6 +45,8 @@ type dbEntry struct {
 }
 
 func (module *DNSModule) Startup() {
+	log.Printf("DNS Server listen on %v:%v UDP", module.ServiceAddr, module.ServicePort)
+	log.Printf("DNS Server listen on %v:%v TCP", module.ServiceAddr, module.ServicePort)
 	dns.HandleFunc(module.BaseName, module.dnsHandler)
 
 	go func() {
@@ -83,13 +85,15 @@ func (module *DNSModule) Apply(apps []*core.AppCluster) {
 	module.dbMutex.Unlock()
 
 	for _, app := range apps {
-		if err := module.update(app); err != nil {
+		err := module.update(app)
+		if err != nil {
 			return
 		}
 	}
 }
 
 func (module *DNSModule) AddTask(task *core.AppBackend, app *core.AppCluster) {
+	log.Printf("DNS AddTask : %v, %v", task, app)
 	module.update(app)
 }
 
@@ -104,7 +108,7 @@ func (module *DNSModule) update(app *core.AppCluster) error {
 		ipAddresses = append(ipAddresses, ip.IP)
 	}
 
-	var reversed = module.makeDnsNameFromAppId(app.Id)
+	var reversed = module.makeDnsNameFromAppName(app.Name)
 	var entry = &dbEntry{
 		ipAddresses: ipAddresses,
 		app:         app,
@@ -118,6 +122,7 @@ func (module *DNSModule) update(app *core.AppCluster) error {
 }
 
 func (module *DNSModule) RemoveTask(task *core.AppBackend, app *core.AppCluster) {
+	log.Printf("DNS RemoveTask : %v, %v", task, app)
 	module.update(app)
 }
 
@@ -188,8 +193,8 @@ func (module *DNSModule) makeAllSRV(entry *dbEntry) []dns.RR {
 	return result
 }
 
-func (module *DNSModule) makeDnsNameFromAppId(appID string) string {
-	var parts = strings.Split(appID, "/")[1:]
+func (module *DNSModule) makeDnsNameFromAppName(appName string) string {
+	var parts = strings.Split(appName, "/")[1:]
 	var reversedParts []string
 	for i := range parts {
 		reversedParts = append(reversedParts, parts[len(parts)-i-1])
