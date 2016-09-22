@@ -2,6 +2,7 @@ package util
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -304,3 +305,23 @@ func SortedStrStrKeys(m map[string]string) []string {
 }
 
 // }}}
+
+func ConvertToJsonString(obj interface{}) string {
+	out, err := json.MarshalIndent(&obj, "", " ")
+	if err == nil {
+		return string(out)
+	} else {
+		return ""
+	}
+}
+
+func FindMarathonAppById(apps []marathon.App, id string) *marathon.App {
+	for i, mi := range apps {
+		if mi.Id == id {
+			return &apps[i]
+		} else {
+			log.Printf("FindMarathonAppById: skip %v", mi.Id)
+		}
+	}
+	return nil
+}

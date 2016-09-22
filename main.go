@@ -358,7 +358,7 @@ func (mmsd *mmsdService) setupEventBusListener() {
 
 	bus.OnOpen = mmsd.OnMarathonConnected
 	bus.OnError = mmsd.OnMarathonConnectionFailure
-	//bus.AddEventListener("deployment_info", mmsd.DeploymentStart)
+	bus.AddEventListener("deployment_info", mmsd.DeploymentStarted)
 	//bus.AddEventListener("deployment_success", mmsd.DeploymentSuccess)
 	//bus.AddEventListener("deployment_failed", mmsd.DeploymentFailed)
 	bus.AddEventListener("status_update_event", mmsd.StatusUpdateEvent)
@@ -374,6 +374,24 @@ func (mmsd *mmsdService) OnMarathonConnected(event, data string) {
 
 func (mmsd *mmsdService) OnMarathonConnectionFailure(event, data string) {
 	log.Printf("Marathon Event Stream Error. %v. %v\n", event, data)
+}
+
+func (mmsd *mmsdService) DeploymentStarted(data string) {
+	var event marathon.DeploymentInfoEvent
+	err := json.Unmarshal([]byte(data), &event)
+	if err != nil {
+		log.Printf("Failed to unmarshal DeploymentInfoEvent. %v", err)
+		log.Printf("deployment_info: %v", data)
+		return
+	}
+
+	log.Printf("app: %v", data)
+	// for _, action := range event.CurrentStep.Actions {
+	// 	log.Printf("action: %+v", action)
+	// 	app := util.FindMarathonAppById(event.Plan.Target.Apps, action.App)
+	// 	log.Printf("app: %v", util.ConvertToJsonString(app))
+	// }
+	// log.Printf("apps => %+v", event.Plan.Target.Apps)
 }
 
 // StatusUpdateEvent is invoked by SSE when exactly this named event is fired.
@@ -437,7 +455,15 @@ func (mmsd *mmsdService) HealthStatusChangedEvent(data string) {
 	} else if event.Alive {
 		if taskUpdateEvent, ok := mmsd.taskEvents[event.TaskId]; ok {
 			log.Printf("taskUpdateEvent: %+v", taskUpdateEvent)
-			// TODO: fee mmsd.apps[appIds] with tasks
+			// for portIndex, port := range taskUpdateEvent.Ports {
+			// 	task := &core.AppBackend{
+			// 		Id:    event.TaskId,
+			// 		Host:  taskUpdateEvent.Host,
+			// 		Port:  port,
+			// 		State: string(taskUpdateEvent.TaskStatus),
+			// 	}
+			// }
+			// TODO: feed mmsd.apps[appIds] with tasks
 			// TODO mmsd.AddTask(event.AppId, event.TaskId)
 		}
 	} else {
