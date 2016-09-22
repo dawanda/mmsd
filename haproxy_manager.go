@@ -270,7 +270,7 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 		if len(app.HealthChecks) == 0 || isAppJustSpawned(app) {
 			log.Printf("[haproxy] App %v on host %v becomes healthy (or alive) first time. force reload config.\n",
 				app.Id, task.Host)
-			return manager.reloadConfig(true)
+			return manager.reloadConfig(false)
 		}
 	}
 
