@@ -28,37 +28,34 @@ XXX Changes:
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/dawanda/go-mesos/marathon"
+	"github.com/dawanda/mmsd/core"
+	"github.com/dawanda/mmsd/modules"
+	"github.com/dawanda/mmsd/sse"
+	"github.com/dawanda/mmsd/util"
 	"github.com/gorilla/mux"
 	flag "github.com/ogier/pflag"
 )
 
-type mmsdHandler interface {
-	Setup() error
-	Apply(apps []*marathon.App, force bool) error
-	Update(app *marathon.App, taskID string) error
-	Remove(appID string, taskID string, app *marathon.App) error
-}
-
 type mmsdService struct {
 	HttpApiPort       uint
 	Verbose           bool
-	Handlers          []mmsdHandler
+	Handlers          []core.EventListener
 	quitChannel       chan bool
 	RunStateDir       string
-	FilterGroups      string
+	FilterGroups      []string
 	LocalHealthChecks bool
 	ManagementAddr    net.IP
 
@@ -67,6 +64,8 @@ type mmsdService struct {
 
 	// service discovery IP-management
 	ManagedIP net.IP
+
+	EventLoggerEnabled bool
 
 	// file based service discovery
 	FilesEnabled bool
@@ -93,13 +92,19 @@ type mmsdService struct {
 	UDPEnabled bool
 
 	// DNS service discovery
-	DnsEnabled  bool
-	DnsPort     uint
-	DnsBaseName string
-	DnsTTL      time.Duration
-	DnsPushSRV  bool
+	DNSEnabled  bool
+	DNSPort     uint
+	DNSBaseName string
+	DNSTTL      time.Duration
+	DNSPushSRV  bool
+
+	// runtime state
+	apps         []*core.AppCluster                    // cache of latest state of all app clusters
+	taskEvents   map[string]marathon.StatusUpdateEvent // map of last task status update events
+	killingTasks map[string]bool                       // set of tasks currently in killing state
 }
 
+// {{{ HTTP endpoint
 func (mmsd *mmsdService) setupHttpService() {
 	router := mux.NewRouter()
 	router.HandleFunc("/ping", mmsd.v0Ping)
@@ -148,59 +153,13 @@ func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%s\n", strings.Join(appList, "\n"))
 }
 
-var ErrInvalidPortRange = errors.New("Invalid port range")
-
-func parseRange(input string) (int, int, error) {
-	if len(input) == 0 {
-		return 0, 0, nil
-	}
-
-	vals := strings.Split(input, ":")
-	log.Printf("vals: %+q\n", vals)
-
-	if len(vals) == 1 {
-		i, err := strconv.Atoi(input)
-		return i, i, err
-	}
-
-	if len(vals) > 2 {
-		return 0, 0, ErrInvalidPortRange
-	}
-
-	var (
-		begin int
-		end   int
-		err   error
-	)
-
-	// parse begin
-	if vals[0] != "" {
-		begin, err = strconv.Atoi(vals[0])
-		if err != nil {
-			return begin, end, err
-		}
-	}
-
-	// parse end
-	if vals[1] != "" {
-		end, err = strconv.Atoi(vals[1])
-		if begin > end {
-			return begin, end, ErrInvalidPortRange
-		}
-	} else {
-		end = -1 // XXX that is: until the end
-	}
-
-	return begin, end, err
-}
-
 func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["app_id"]
 	noResolve := r.URL.Query().Get("noresolve") == "1"
 	withServerID := r.URL.Query().Get("withid") == "1"
 
-	portBegin, portEnd, err := parseRange(r.URL.Query().Get("portIndex"))
+	portBegin, portEnd, err := util.ParseRange(r.URL.Query().Get("portIndex"))
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		log.Printf("error parsing range. %v\n", err)
@@ -250,10 +209,10 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	for _, task := range app.Tasks {
 		item := ""
 		if withServerID {
-			item += fmt.Sprintf("%v:", Hash(task.SlaveId))
+			item += fmt.Sprintf("%v:", util.Hash(task.SlaveId))
 		}
 
-		item += resolveIPAddr(task.Host, noResolve)
+		item += util.ResolveIPAddr(task.Host, noResolve)
 
 		for portIndex := portBegin; portIndex <= portEnd; portIndex++ {
 			item += fmt.Sprintf(":%d", task.Ports[portIndex])
@@ -269,111 +228,31 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func resolveIPAddr(dns string, skip bool) string {
-	if skip {
-		return dns
-	} else {
-		ip, err := net.ResolveIPAddr("ip", dns)
-		if err != nil {
-			return dns
-		} else {
-			return ip.String()
+// }}}
+
+func (mmsd *mmsdService) isGroupIncluded(groupName string) bool {
+	for _, filterGroup := range mmsd.FilterGroups {
+		if groupName == filterGroup || filterGroup == "*" {
+			return true
 		}
 	}
+	return false
 }
 
-func (mmsd *mmsdService) setupEventBusListener() {
-	var url = fmt.Sprintf("http://%v:%v/v2/events",
-		mmsd.MarathonIP, mmsd.MarathonPort)
-
-	var sse = NewEventSource(url, mmsd.ReconnectDelay)
-
-	sse.OnOpen = func(event, data string) {
-		log.Printf("Listening for events from Marathon on %v\n", url)
-	}
-
-	sse.OnError = func(event, data string) {
-		log.Printf("Marathon Event Stream Error. %v. %v\n", event, data)
-	}
-
-	sse.AddEventListener("status_update_event", func(data string) {
-		var event marathon.StatusUpdateEvent
-		err := json.Unmarshal([]byte(data), &event)
-		if err != nil {
-			log.Printf("Failed to unmarshal status_update_event. %v\n", err)
-			log.Printf("status_update_event: %+v\n", data)
-		} else {
-			mmsd.statusUpdateEvent(&event)
-		}
-	})
-
-	sse.AddEventListener("health_status_changed_event", func(data string) {
-		var event marathon.HealthStatusChangedEvent
-		err := json.Unmarshal([]byte(data), &event)
-		if err != nil {
-			log.Printf("Failed to unmarshal health_status_changed_event. %v\n", err)
-		} else {
-			mmsd.healthStatusChangedEvent(&event)
-		}
-	})
-
-	go sse.RunForever()
-}
-
-func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
-	switch event.TaskStatus {
-	case marathon.TaskRunning:
-		app, err := mmsd.getMarathonApp(event.AppId)
-		if err != nil {
-			log.Printf("App %v task %v on %v is running but failed to fetch infos. %v\n",
-				event.AppId, event.TaskId, event.Host, err)
-			return
-		}
-		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
-
-		// XXX Only update propagate no health checks have been configured.
-		// So we consider thie TASK_RUNNING state as healthy-notice.
-		if len(app.HealthChecks) == 0 {
-			mmsd.Update(event.AppId, event.TaskId, true)
-		}
-	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilling, marathon.TaskKilled, marathon.TaskLost:
-		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
-		app, err := mmsd.getMarathonApp(event.AppId)
-		if err != nil {
-			log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
-			return
-		}
-		mmsd.Remove(event.AppId, event.TaskId, app)
-	}
-}
-
-func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusChangedEvent) {
-	app, err := mmsd.getMarathonApp(event.AppId)
+func (mmsd *mmsdService) getMarathonApps() []marathon.App {
+	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
 	if err != nil {
-		log.Printf("Failed to fetch Marathon app. %+v. %v\n", event, err)
-		return
-	}
-	if app == nil {
-		log.Printf("App %v not found anymore.\n", event.AppId)
-		return
+		log.Printf("Failed to get marathon.Service: %v\n", err)
+		return nil
 	}
 
-	task := app.GetTaskById(event.TaskId)
-	if task == nil {
-		log.Printf("App %v task %v not found anymore.\n", event.AppId, event.TaskId)
-		mmsd.Remove(event.AppId, event.TaskId, app)
-		return
+	mApps, err := m.GetApps()
+	var mApps2 []marathon.App
+	for _, mApp := range mApps {
+		mApps2 = append(mApps2, *mApp)
 	}
 
-	// app & task definitely do exist, so propagate health change event
-
-	if event.Alive {
-		log.Printf("App %v task %v on %v is healthy.\n", event.AppId, event.TaskId, task.Host)
-	} else {
-		log.Printf("App %v task %v on %v is unhealthy.\n", event.AppId, event.TaskId, task.Host)
-	}
-
-	mmsd.Update(event.AppId, event.TaskId, event.Alive)
+	return mApps2
 }
 
 func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
@@ -390,56 +269,245 @@ func (mmsd *mmsdService) getMarathonApp(appID string) (*marathon.App, error) {
 	return app, nil
 }
 
-// enable/disable given app:task
-func (mmsd *mmsdService) Update(appID string, taskID string, alive bool) {
-	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
-	if err != nil {
-		log.Printf("Update: NewService(%q, %v) failed. %v\n", mmsd.MarathonIP, mmsd.MarathonPort, err)
-		return
-	}
+// convertMarathonApps converts an array of marathon.App into a []AppCluster.
+func (mmsd *mmsdService) convertMarathonApps(mApps []marathon.App) []*core.AppCluster {
+	var apps []*core.AppCluster
+	for _, mApp := range mApps {
+		for portIndex, portDef := range mApp.PortDefinitions {
+			if mmsd.isGroupIncluded(portDef.Labels["lb-group"]) {
+				var healthCheck *core.AppHealthCheck
+				if mHealthCheck := util.FindHealthCheckForPortIndex(mApp.HealthChecks, portIndex); mHealthCheck != nil {
+					var mCommand *string
+					if mHealthCheck.Command != nil {
+						mCommand = new(string)
+						*mCommand = mHealthCheck.Command.Value
+					}
+					healthCheck = &core.AppHealthCheck{
+						Protocol:               mHealthCheck.Protocol,
+						Path:                   mHealthCheck.Path,
+						Command:                mCommand,
+						GracePeriodSeconds:     mHealthCheck.GracePeriodSeconds,
+						IntervalSeconds:        mHealthCheck.IntervalSeconds,
+						TimeoutSeconds:         mHealthCheck.TimeoutSeconds,
+						MaxConsecutiveFailures: mHealthCheck.MaxConsecutiveFailures,
+						IgnoreHttp1xx:          mHealthCheck.IgnoreHttp1xx,
+					}
+				}
 
-	app, err := m.GetApp(appID)
-	if err != nil {
-		log.Printf("Update: GetApp(%q) failed. %v\n", appID, err)
-		return
-	}
+				var backends []core.AppBackend
+				for _, mTask := range mApp.Tasks {
+					backends = append(backends, core.AppBackend{
+						Id:    mTask.Id,
+						Host:  mTask.Host,
+						Port:  mTask.Ports[portIndex],
+						State: string(*mTask.State),
+					})
+				}
+				// TODO: sort backends ASC
 
-	for _, handler := range mmsd.Handlers {
-		err = handler.Update(app, taskID)
-		if err != nil {
-			log.Printf("Update failed. %v\n", err)
+				labels := make(map[string]string)
+				for k, v := range mApp.Labels {
+					labels[k] = v
+				}
+				for k, v := range mApp.PortDefinitions[portIndex].Labels {
+					labels[k] = v
+				}
+
+				servicePort := mApp.PortDefinitions[portIndex].Port
+				app := &core.AppCluster{
+					Name:        mApp.Id,
+					Id:          util.PrettifyAppId(mApp.Id, portIndex, servicePort),
+					ServicePort: servicePort,
+					Protocol:    mApp.PortDefinitions[portIndex].Protocol,
+					PortName:    mApp.PortDefinitions[portIndex].Name,
+					Labels:      labels,
+					HealthCheck: healthCheck,
+					Backends:    backends,
+					PortIndex:   portIndex,
+				}
+				apps = append(apps, app)
+			}
 		}
 	}
+	return apps
 }
 
-func (mmsd *mmsdService) Remove(appID string, taskID string, app *marathon.App) {
-	for _, handler := range mmsd.Handlers {
-		err := handler.Remove(appID, taskID, app)
-		if err != nil {
-			log.Printf("Remove failed. %v\n", err)
-		}
-	}
-}
-
-func (mmsd *mmsdService) MaybeResetFromTasks(force bool) error {
-	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
-	if err != nil {
-		return fmt.Errorf("Could not create new marathon service. %v", err)
-	}
-
-	apps, err := m.GetApps()
-	if err != nil {
-		return fmt.Errorf("Could not get apps. %v", err)
-	}
-
-	for _, handler := range mmsd.Handlers {
-		err = handler.Apply(apps, force)
-		if err != nil {
-			log.Printf("Failed to apply changes to handler. %v\n", err)
-		}
-	}
-
+func (mmsd *mmsdService) getAppByMarathonId(appId string, portIndex int) *core.AppCluster {
+	log.Printf("Application %v with port index %v not found.",
+		appId, portIndex)
 	return nil
+}
+
+// findAppsByMarathonId returns list of all applications that belong to the
+// given Marathon App mAppId.
+func (mmsd *mmsdService) findAppsByMarathonId(mAppId string) []*core.AppCluster {
+	var apps []*core.AppCluster
+	for _, app := range mmsd.apps {
+		if app.Name == mAppId {
+			apps = append(apps, app)
+		}
+	}
+	return apps
+}
+
+func (mmsd *mmsdService) setupEventBusListener() {
+	var url = fmt.Sprintf("http://%v:%v/v2/events",
+		mmsd.MarathonIP, mmsd.MarathonPort)
+
+	var bus = sse.NewEventSource(url, mmsd.ReconnectDelay)
+
+	bus.OnOpen = mmsd.OnMarathonConnected
+	bus.OnError = mmsd.OnMarathonConnectionFailure
+	bus.AddEventListener("deployment_info", mmsd.DeploymentStarted)
+	//bus.AddEventListener("deployment_success", mmsd.DeploymentSuccess)
+	//bus.AddEventListener("deployment_failed", mmsd.DeploymentFailed)
+	bus.AddEventListener("status_update_event", mmsd.StatusUpdateEvent)
+	bus.AddEventListener("health_status_changed_event", mmsd.HealthStatusChangedEvent)
+
+	go bus.RunForever()
+}
+
+func (mmsd *mmsdService) OnMarathonConnected(event, data string) {
+	log.Printf("Listening for events from Marathon on %v:%v\n", mmsd.MarathonIP, mmsd.MarathonPort)
+	mmsd.applyApps(mmsd.convertMarathonApps(mmsd.getMarathonApps()))
+}
+
+func (mmsd *mmsdService) OnMarathonConnectionFailure(event, data string) {
+	log.Printf("Marathon Event Stream Error. %v. %v\n", event, data)
+}
+
+func (mmsd *mmsdService) DeploymentStarted(data string) {
+	var event marathon.DeploymentInfoEvent
+	err := json.Unmarshal([]byte(data), &event)
+	if err != nil {
+		log.Printf("Failed to unmarshal DeploymentInfoEvent. %v", err)
+		log.Printf("deployment_info: %v", data)
+		return
+	}
+
+	log.Printf("app: %v", data)
+	// for _, action := range event.CurrentStep.Actions {
+	// 	log.Printf("action: %+v", action)
+	// 	app := util.FindMarathonAppById(event.Plan.Target.Apps, action.App)
+	// 	log.Printf("app: %v", util.ConvertToJsonString(app))
+	// }
+	// log.Printf("apps => %+v", event.Plan.Target.Apps)
+}
+
+// StatusUpdateEvent is invoked by SSE when exactly this named event is fired.
+func (mmsd *mmsdService) StatusUpdateEvent(data string) {
+	var event marathon.StatusUpdateEvent
+	err := json.Unmarshal([]byte(data), &event)
+	if err != nil {
+		log.Printf("Failed to unmarshal status_update_event. %v\n", err)
+		log.Printf("status_update_event: %+v\n", data)
+		return
+	}
+
+	switch event.TaskStatus {
+	case marathon.TaskRunning:
+		app, err := mmsd.getMarathonApp(event.AppId)
+		if err != nil {
+			log.Printf("App %v task %v on %v is running but failed to fetch infos. %v\n",
+				event.AppId, event.TaskId, event.Host, err)
+			return
+		}
+
+		log.Printf(
+			"App %v task %v on %v changed status. %v. %v\n",
+			event.AppId, event.TaskId, event.Host, event.TaskStatus, event.Message)
+
+		// XXX Only update propagate no health checks have been configured.
+		// So we consider thie TASK_RUNNING state as healthy-notice.
+		if len(app.HealthChecks) == 0 {
+			mmsd.AddTask(
+				event.AppId,
+				event.TaskId,
+				string(event.TaskStatus),
+				event.Host,
+				event.Ports)
+		} else {
+			// Remember the update event so as soon as the task becomes healthy,
+			// we can send a full AddTask() event to the handlers.
+			mmsd.taskEvents[event.TaskId] = event
+		}
+	case marathon.TaskKilling:
+		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
+		mmsd.killingTasks[event.TaskId] = true
+		mmsd.RemoveTask(event.AppId, event.TaskId, event.TaskStatus)
+	case marathon.TaskFinished, marathon.TaskFailed, marathon.TaskKilled, marathon.TaskLost:
+		log.Printf("App %v task %v on %v changed status. %v.\n", event.AppId, event.TaskId, event.Host, event.TaskStatus)
+		delete(mmsd.taskEvents, event.TaskId)
+		if !mmsd.killingTasks[event.TaskId] {
+			mmsd.RemoveTask(event.AppId, event.TaskId, event.TaskStatus)
+		} else {
+			delete(mmsd.killingTasks, event.TaskId)
+		}
+	}
+}
+
+// HealthStatusChangedEvent is invoked by SSE when exactly this named event is fired.
+func (mmsd *mmsdService) HealthStatusChangedEvent(data string) {
+	var event marathon.HealthStatusChangedEvent
+	err := json.Unmarshal([]byte(data), &event)
+	if err != nil {
+		log.Printf("Failed to unmarshal health_status_changed_event. %v\n", err)
+	} else if event.Alive {
+		if taskUpdateEvent, ok := mmsd.taskEvents[event.TaskId]; ok {
+			log.Printf("taskUpdateEvent: %+v", taskUpdateEvent)
+			// for portIndex, port := range taskUpdateEvent.Ports {
+			// 	task := &core.AppBackend{
+			// 		Id:    event.TaskId,
+			// 		Host:  taskUpdateEvent.Host,
+			// 		Port:  port,
+			// 		State: string(taskUpdateEvent.TaskStatus),
+			// 	}
+			// }
+			// TODO: feed mmsd.apps[appIds] with tasks
+			// TODO mmsd.AddTask(event.AppId, event.TaskId)
+		}
+	} else {
+		mmsd.RemoveTask(event.AppId, event.TaskId, "TASK_RUNNING")
+	}
+}
+
+// AddTask ensures the given task is added to the app and all handlers are
+// notified as well.
+func (mmsd *mmsdService) AddTask(appId, taskId, taskStatus, host string, ports []uint) {
+	for portIndex, port := range ports {
+		if app := mmsd.getAppByMarathonId(appId, portIndex); app != nil {
+			task := core.AppBackend{
+				Id:    taskId,
+				Host:  host,
+				Port:  port,
+				State: string(taskStatus),
+			}
+			app.Backends = append(app.Backends, task)
+
+			for _, handler := range mmsd.Handlers {
+				handler.AddTask(&task, app)
+			}
+		}
+	}
+}
+
+func (mmsd *mmsdService) RemoveTask(appId, taskId string, newStatus marathon.TaskStatus) bool {
+	var found uint
+	for _, app := range mmsd.findAppsByMarathonId(appId) {
+		for i, task := range app.Backends {
+			if task.Id == taskId {
+				// update task state, and remove task out of app cluster's task list
+				task.State = string(newStatus)
+				app.Backends = append(app.Backends[:0], app.Backends[i+1:]...)
+
+				for _, handler := range mmsd.Handlers {
+					handler.RemoveTask(&task, app)
+				}
+				found++
+			}
+		}
+	}
+	return found > 0
 }
 
 const appVersion = "0.9.12"
@@ -451,17 +519,19 @@ func showVersion() {
 }
 
 func (mmsd *mmsdService) Run() {
+	var filterGroups = "*"
 	flag.BoolVarP(&mmsd.Verbose, "verbose", "v", mmsd.Verbose, "Set verbosity level")
 	flag.IPVar(&mmsd.MarathonIP, "marathon-ip", mmsd.MarathonIP, "Marathon endpoint TCP IP address")
 	flag.UintVar(&mmsd.MarathonPort, "marathon-port", mmsd.MarathonPort, "Marathon endpoint TCP port number")
 	flag.DurationVar(&mmsd.ReconnectDelay, "reconnect-delay", mmsd.ReconnectDelay, "Marathon reconnect delay")
 	flag.StringVar(&mmsd.RunStateDir, "run-state-dir", mmsd.RunStateDir, "Path to directory to keep run-state")
-	flag.StringVar(&mmsd.FilterGroups, "filter-groups", mmsd.FilterGroups, "Application group filter")
+	flag.StringVar(&filterGroups, "filter-groups", filterGroups, "Application group filter")
 	flag.IPVar(&mmsd.ManagedIP, "managed-ip", mmsd.ManagedIP, "IP-address to manage for mmsd")
 	flag.BoolVar(&mmsd.GatewayEnabled, "enable-gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.IPVar(&mmsd.GatewayAddr, "gateway-bind", mmsd.GatewayAddr, "gateway bind address")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-port-http", mmsd.GatewayPortHTTP, "gateway port for HTTP")
 	flag.UintVar(&mmsd.GatewayPortHTTPS, "gateway-port-https", mmsd.GatewayPortHTTPS, "gateway port for HTTPS")
+	flag.BoolVar(&mmsd.EventLoggerEnabled, "enable-eventlogger", mmsd.EventLoggerEnabled, "enables eventlogger module")
 	flag.BoolVar(&mmsd.FilesEnabled, "enable-files", mmsd.FilesEnabled, "enables file based service discovery")
 	flag.BoolVar(&mmsd.UDPEnabled, "enable-udp", mmsd.UDPEnabled, "enables UDP load balancing")
 	flag.BoolVar(&mmsd.TCPEnabled, "enable-tcp", mmsd.TCPEnabled, "enables haproxy TCP load balancing")
@@ -470,11 +540,11 @@ func (mmsd *mmsdService) Run() {
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceAddr, "haproxy-bind", mmsd.ServiceAddr, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
-	flag.BoolVar(&mmsd.DnsEnabled, "enable-dns", mmsd.DnsEnabled, "Enables DNS-based service discovery")
-	flag.UintVar(&mmsd.DnsPort, "dns-port", mmsd.DnsPort, "DNS service discovery port")
-	flag.BoolVar(&mmsd.DnsPushSRV, "dns-push-srv", mmsd.DnsPushSRV, "DNS service discovery to also push SRV on A")
-	flag.StringVar(&mmsd.DnsBaseName, "dns-basename", mmsd.DnsBaseName, "DNS service discovery's base name")
-	flag.DurationVar(&mmsd.DnsTTL, "dns-ttl", mmsd.DnsTTL, "DNS service discovery's reply message TTL")
+	flag.BoolVar(&mmsd.DNSEnabled, "enable-dns", mmsd.DNSEnabled, "Enables DNS-based service discovery")
+	flag.UintVar(&mmsd.DNSPort, "dns-port", mmsd.DNSPort, "DNS service discovery port")
+	flag.BoolVar(&mmsd.DNSPushSRV, "dns-push-srv", mmsd.DNSPushSRV, "DNS service discovery to also push SRV on A")
+	flag.StringVar(&mmsd.DNSBaseName, "dns-basename", mmsd.DNSBaseName, "DNS service discovery's base name")
+	flag.DurationVar(&mmsd.DNSTTL, "dns-ttl", mmsd.DNSTTL, "DNS service discovery's reply message TTL")
 	showVersionAndExit := flag.BoolP("version", "V", false, "Shows version and exits")
 
 	flag.Usage = func() {
@@ -486,6 +556,8 @@ func (mmsd *mmsdService) Run() {
 
 	flag.Parse()
 
+	mmsd.FilterGroups = strings.Split(filterGroups, ",")
+
 	if *showVersionAndExit {
 		showVersion()
 		os.Exit(0)
@@ -496,40 +568,60 @@ func (mmsd *mmsdService) Run() {
 	mmsd.setupHttpService()
 
 	<-mmsd.quitChannel
+
+	for _, handler := range mmsd.Handlers {
+		handler.Shutdown()
+	}
+}
+
+func (mmsd *mmsdService) Shutdown() {
+	mmsd.quitChannel <- true
+}
+
+func (mmsd *mmsdService) applyApps(apps []*core.AppCluster) {
+	mmsd.apps = apps
+
+	for _, handler := range mmsd.Handlers {
+		handler.Apply(apps)
+	}
 }
 
 func (mmsd *mmsdService) setupHandlers() {
-	if mmsd.DnsEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
-			Verbose:     mmsd.Verbose,
-			ServiceAddr: mmsd.ServiceAddr,
-			ServicePort: mmsd.DnsPort,
-			PushSRV:     mmsd.DnsPushSRV,
-			BaseName:    mmsd.DnsBaseName,
-			DnsTTL:      mmsd.DnsTTL,
+	if mmsd.EventLoggerEnabled {
+		mmsd.Handlers = append(mmsd.Handlers, &modules.EventLoggerModule{
+			Verbose: mmsd.Verbose,
 		})
 	}
 
-	if mmsd.UDPEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(
-			mmsd.ServiceAddr,
-			mmsd.Verbose,
-			mmsd.UDPEnabled,
-		))
+	if mmsd.DNSEnabled {
+		mmsd.Handlers = append(mmsd.Handlers, &modules.DNSModule{
+			Verbose:     mmsd.Verbose,
+			ServiceAddr: mmsd.ServiceAddr,
+			ServicePort: mmsd.DNSPort,
+			PushSRV:     mmsd.DNSPushSRV,
+			BaseName:    mmsd.DNSBaseName,
+			DNSTTL:      mmsd.DNSTTL,
+		})
 	}
 
+	// if mmsd.UDPEnabled {
+	// 	mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(
+	// 		mmsd.ServiceAddr,
+	// 		mmsd.Verbose,
+	// 		mmsd.UDPEnabled,
+	// 	))
+	// }
+
 	if mmsd.TCPEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, &HaproxyMgr{
-			Enabled:           mmsd.TCPEnabled,
+		mmsd.Handlers = append(mmsd.Handlers, &modules.HaproxyModule{
 			Verbose:           mmsd.Verbose,
 			LocalHealthChecks: mmsd.LocalHealthChecks,
-			FilterGroups:      strings.Split(mmsd.FilterGroups, ","),
 			ServiceAddr:       mmsd.ServiceAddr,
 			GatewayEnabled:    mmsd.GatewayEnabled,
 			GatewayAddr:       mmsd.GatewayAddr,
 			GatewayPortHTTP:   mmsd.GatewayPortHTTP,
 			GatewayPortHTTPS:  mmsd.GatewayPortHTTPS,
-			Executable:        mmsd.HaproxyBin,
+			HaproxyExe:        mmsd.HaproxyBin,
 			ConfigTailPath:    mmsd.HaproxyTailCfg,
 			ConfigPath:        filepath.Join(mmsd.RunStateDir, "haproxy.cfg"),
 			OldConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg.old"),
@@ -541,24 +633,14 @@ func (mmsd *mmsdService) setupHandlers() {
 	}
 
 	if mmsd.FilesEnabled {
-		mmsd.Handlers = append(mmsd.Handlers, &FilesManager{
-			Enabled:  mmsd.FilesEnabled,
+		mmsd.Handlers = append(mmsd.Handlers, &modules.FilesManager{
 			Verbose:  mmsd.Verbose,
 			BasePath: mmsd.RunStateDir + "/confd",
 		})
 	}
 
 	for _, handler := range mmsd.Handlers {
-		err := handler.Setup()
-		if err != nil {
-			log.Fatalf("Failed to setup handlers. %v\n", err)
-		}
-	}
-
-	// trigger initial run
-	err := mmsd.MaybeResetFromTasks(true)
-	if err != nil {
-		log.Printf("Could not force task state reset. %v\n", err)
+		handler.Startup()
 	}
 }
 
@@ -574,34 +656,45 @@ func locateExe(name string) string {
 
 func main() {
 	var mmsd = mmsdService{
-		MarathonScheme:    "http",
-		MarathonIP:        net.ParseIP("127.0.0.1"),
-		MarathonPort:      8080,
-		ReconnectDelay:    time.Second * 4,
-		RunStateDir:       "/var/run/mmsd",
-		FilterGroups:      "*",
-		GatewayEnabled:    false,
-		GatewayAddr:       net.ParseIP("0.0.0.0"),
-		GatewayPortHTTP:   80,
-		GatewayPortHTTPS:  443,
-		FilesEnabled:      true,
-		UDPEnabled:        true,
-		TCPEnabled:        true,
-		LocalHealthChecks: true,
-		HaproxyBin:        locateExe("haproxy"),
-		HaproxyTailCfg:    "/etc/mmsd/haproxy-tail.cfg",
-		HaproxyPort:       8081,
-		ManagementAddr:    net.ParseIP("0.0.0.0"),
-		ServiceAddr:       net.ParseIP("0.0.0.0"),
-		HttpApiPort:       8082,
-		Verbose:           false,
-		DnsEnabled:        false,
-		DnsPort:           53,
-		DnsPushSRV:        false,
-		DnsBaseName:       "mmsd.",
-		DnsTTL:            time.Second * 5,
-		quitChannel:       make(chan bool),
+		MarathonScheme:     "http",
+		MarathonIP:         net.ParseIP("127.0.0.1"),
+		MarathonPort:       8080,
+		ReconnectDelay:     time.Second * 4,
+		RunStateDir:        "/var/run/mmsd",
+		GatewayEnabled:     false,
+		GatewayAddr:        net.ParseIP("0.0.0.0"),
+		GatewayPortHTTP:    80,
+		GatewayPortHTTPS:   443,
+		EventLoggerEnabled: false,
+		FilesEnabled:       false,
+		UDPEnabled:         false,
+		TCPEnabled:         false,
+		LocalHealthChecks:  true,
+		HaproxyBin:         locateExe("haproxy"),
+		HaproxyTailCfg:     "/etc/mmsd/haproxy-tail.cfg",
+		HaproxyPort:        8081,
+		ManagementAddr:     net.ParseIP("0.0.0.0"),
+		ServiceAddr:        net.ParseIP("0.0.0.0"),
+		HttpApiPort:        8082,
+		Verbose:            false,
+		DNSEnabled:         false,
+		DNSPort:            53,
+		DNSPushSRV:         false,
+		DNSBaseName:        "mmsd.",
+		DNSTTL:             time.Second * 5,
+		quitChannel:        make(chan bool),
+		taskEvents:         make(map[string]marathon.StatusUpdateEvent),
+		killingTasks:       make(map[string]bool),
 	}
+
+	// trap SIGTERM and SIGINT
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		s := <-sigc
+		log.Printf("Caught signal %v. Terminating", s)
+		mmsd.Shutdown()
+	}()
 
 	mmsd.Run()
 }

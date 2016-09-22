@@ -1,22 +1,36 @@
-package main
+package util
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"log"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/dawanda/go-mesos/marathon"
 )
 
+var (
+	ErrInvalidPortRange = errors.New("Invalid port range")
+)
+
 func PrettifyAppId(name string, portIndex int, servicePort uint) (appID string) {
 	appID = strings.Replace(name[1:], "/", ".", -1)
 	appID = fmt.Sprintf("%v-%v-%v", appID, portIndex, servicePort)
+
+	return
+}
+
+func PrettifyAppId2(name string, portIndex int) (appID string) {
+	appID = strings.Replace(name[1:], "/", ".", -1)
+	appID = fmt.Sprintf("%v-%v", appID, portIndex)
 
 	return
 }
@@ -165,6 +179,16 @@ func GetHealthCheckProtocol(app *marathon.App, portIndex int) string {
 	return ""
 }
 
+func FindHealthCheckForPortIndex(healthChecks []marathon.HealthCheck, portIndex int) *marathon.HealthCheck {
+	for _, hs := range healthChecks {
+		if hs.PortIndex == portIndex {
+			return &hs
+		}
+	}
+
+	return nil
+}
+
 func GetHealthCheckForPortIndex(healthChecks []marathon.HealthCheck, portIndex int) marathon.HealthCheck {
 	for _, hs := range healthChecks {
 		if hs.PortIndex == portIndex {
@@ -179,4 +203,125 @@ func Hash(s string) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(s))
 	return h.Sum32()
+}
+
+func ResolveIPAddr(dns string, skip bool) string {
+	if skip {
+		return dns
+	} else {
+		ip, err := net.ResolveIPAddr("ip", dns)
+		if err != nil {
+			return dns
+		} else {
+			return ip.String()
+		}
+	}
+}
+
+func ParseRange(input string) (int, int, error) {
+	if len(input) == 0 {
+		return 0, 0, nil
+	}
+
+	vals := strings.Split(input, ":")
+	log.Printf("vals: %+q\n", vals)
+
+	if len(vals) == 1 {
+		i, err := strconv.Atoi(input)
+		return i, i, err
+	}
+
+	if len(vals) > 2 {
+		return 0, 0, ErrInvalidPortRange
+	}
+
+	var (
+		begin int
+		end   int
+		err   error
+	)
+
+	// parse begin
+	if vals[0] != "" {
+		begin, err = strconv.Atoi(vals[0])
+		if err != nil {
+			return begin, end, err
+		}
+	}
+
+	// parse end
+	if vals[1] != "" {
+		end, err = strconv.Atoi(vals[1])
+		if begin > end {
+			return begin, end, ErrInvalidPortRange
+		}
+	} else {
+		end = -1 // XXX that is: until the end
+	}
+
+	return begin, end, err
+}
+
+func MakeStringArray(s string) []string {
+	if len(s) == 0 {
+		return []string{}
+	} else {
+		return strings.Split(s, ",")
+	}
+}
+
+// {{{ SortedStrStrKeys
+type sortedStrStrKeys struct {
+	m map[string]string
+	s []string
+}
+
+func (sm *sortedStrStrKeys) Len() int {
+	return len(sm.m)
+}
+
+func (sm *sortedStrStrKeys) Less(a, b int) bool {
+	// return sm.m[sm.s[a]] > sm.m[sm.s[b]]
+	return sm.s[a] < sm.s[b]
+}
+
+func (sm *sortedStrStrKeys) Swap(a, b int) {
+	sm.s[a], sm.s[b] = sm.s[b], sm.s[a]
+}
+
+func SortedStrStrKeys(m map[string]string) []string {
+	sm := new(sortedStrStrKeys)
+	sm.m = m
+	sm.s = make([]string, len(m))
+
+	i := 0
+	for key, _ := range m {
+		sm.s[i] = key
+		i++
+	}
+	sort.Sort(sm)
+
+	return sm.s
+}
+
+// }}}
+
+func ConvertToJsonString(obj interface{}) string {
+	out, err := json.MarshalIndent(&obj, "", " ")
+	if err == nil {
+		return string(out)
+	} else {
+		return ""
+	}
+}
+
+func FindMarathonAppById(apps []marathon.App, id string) *marathon.App {
+	for i, mi := range apps {
+		if mi.Id == id {
+			return &apps[i]
+		} else {
+			log.Printf("FindMarathonAppById: skip %v", mi.Id)
+		}
+	}
+	return nil
 }

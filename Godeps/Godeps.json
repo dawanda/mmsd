@@ -4,7 +4,7 @@
 	"Deps": [
 		{
 			"ImportPath": "github.com/dawanda/go-mesos/marathon",
-			"Rev": "76abdfc1b8876b39505c5a1e63583bba16f3243a"
+			"Rev": "56dfa5705fdac2336ac685e96a4882af4629e346"
 		},
 		{
 			"ImportPath": "github.com/gorilla/context",

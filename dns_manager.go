@@ -44,7 +44,7 @@ type appEntry struct {
 	app         *marathon.App
 }
 
-func (manager *DnsManager) Setup() error {
+func (manager *DnsManager) Startup() {
 	dns.HandleFunc(manager.BaseName, manager.dnsHandler)
 
 	go func() {
@@ -70,8 +70,6 @@ func (manager *DnsManager) Setup() error {
 			log.Fatal(err)
 		}
 	}()
-
-	return nil
 }
 
 func (manager *DnsManager) Shutdown() {
