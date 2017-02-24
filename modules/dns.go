@@ -26,6 +26,7 @@ import (
 	"github.com/miekg/dns"
 )
 
+// DNSModule provide that is pluginable in the EventListener
 type DNSModule struct {
 	Verbose     bool
 	ServiceAddr net.IP
@@ -76,11 +77,13 @@ func (module *DNSModule) Startup() {
 	}()
 }
 
+// Shutdown stop the DNS server
 func (module *DNSModule) Shutdown() {
 	module.udpServer.Shutdown()
 	module.tcpServer.Shutdown()
 }
 
+// Apply bootstrap the data store from list of AppCluster
 func (module *DNSModule) Apply(apps []*core.AppCluster) {
 	module.dbMutex.Lock()
 	module.db = make(map[string]*dbEntry)
@@ -94,6 +97,7 @@ func (module *DNSModule) Apply(apps []*core.AppCluster) {
 	}
 }
 
+// AddTask replace or add the AppCluster in the data store
 func (module *DNSModule) AddTask(task *core.AppBackend, app *core.AppCluster) {
 	log.Printf("DNS AddTask : %v, %v", task, app)
 	module.update(app)
@@ -110,7 +114,7 @@ func (module *DNSModule) update(app *core.AppCluster) error {
 		ipAddresses = append(ipAddresses, ip.IP)
 	}
 
-	var reversed = module.makeDnsNameFromAppName(app.Name)
+	var reversed = module.makeDNSNameFromAppName(app.Name)
 	var entry = &dbEntry{
 		ipAddresses: ipAddresses,
 		app:         app,
@@ -123,6 +127,7 @@ func (module *DNSModule) update(app *core.AppCluster) error {
 	return nil
 }
 
+// RemoveTask replace or remove the AppCluster from data store
 func (module *DNSModule) RemoveTask(task *core.AppBackend, app *core.AppCluster) {
 	log.Printf("DNS RemoveTask : %v, %v", task, app)
 	module.update(app)
@@ -195,7 +200,7 @@ func (module *DNSModule) makeAllSRV(name string, entry *dbEntry) []dns.RR {
 	return result
 }
 
-func (module *DNSModule) makeDnsNameFromAppName(appName string) string {
+func (module *DNSModule) makeDNSNameFromAppName(appName string) string {
 	var parts = strings.Split(appName, "/")[1:]
 	var reversedParts []string
 	for i := range parts {
