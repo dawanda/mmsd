@@ -44,9 +44,9 @@ type dbEntry struct {
 	app         *core.AppCluster
 }
 
+// Startup bring up a DNS server list UDP and TCP connections
 func (module *DNSModule) Startup() {
-	log.Printf("DNS Server listen on %v:%v UDP", module.ServiceAddr, module.ServicePort)
-	log.Printf("DNS Server listen on %v:%v TCP", module.ServiceAddr, module.ServicePort)
+	log.Printf("DNS Server base name: %s", module.BaseName)
 	dns.HandleFunc(module.BaseName, module.dnsHandler)
 
 	go func() {
@@ -55,6 +55,7 @@ func (module *DNSModule) Startup() {
 			Net:        "udp",
 			TsigSecret: nil,
 		}
+		log.Printf("DNS Server listen on %v:%v UDP", module.ServiceAddr, module.ServicePort)
 		err := module.udpServer.ListenAndServe()
 		if err != nil {
 			log.Fatal(err)
@@ -67,6 +68,7 @@ func (module *DNSModule) Startup() {
 			Net:        "tcp",
 			TsigSecret: nil,
 		}
+		log.Printf("DNS Server listen on %v:%v TCP", module.ServiceAddr, module.ServicePort)
 		err := module.tcpServer.ListenAndServe()
 		if err != nil {
 			log.Fatal(err)
@@ -140,11 +142,11 @@ func (module *DNSModule) dnsHandler(w dns.ResponseWriter, req *dns.Msg) {
 	if ok {
 		switch req.Question[0].Qtype {
 		case dns.TypeSRV:
-			m.Answer = module.makeAllSRV(entry)
+			m.Answer = module.makeAllSRV(req.Question[0].Name, entry)
 		case dns.TypeA:
-			m.Answer = module.makeAllA(entry)
+			m.Answer = module.makeAllA(req.Question[0].Name, entry)
 			if module.PushSRV {
-				m.Extra = module.makeAllSRV(entry)
+				m.Extra = module.makeAllSRV(req.Question[0].Name, entry)
 			}
 		}
 	}
@@ -152,14 +154,14 @@ func (module *DNSModule) dnsHandler(w dns.ResponseWriter, req *dns.Msg) {
 	w.WriteMsg(m)
 }
 
-func (module *DNSModule) makeAllA(entry *dbEntry) []dns.RR {
+func (module *DNSModule) makeAllA(name string, entry *dbEntry) []dns.RR {
 	var result []dns.RR
 
 	for _, ip := range entry.ipAddresses {
 		rr := &dns.A{
 			Hdr: dns.RR_Header{
 				Ttl:    uint32(module.DNSTTL.Seconds()),
-				Name:   module.BaseName,
+				Name:   name,
 				Class:  dns.ClassINET,
 				Rrtype: dns.TypeA,
 			},
@@ -171,14 +173,14 @@ func (module *DNSModule) makeAllA(entry *dbEntry) []dns.RR {
 	return result
 }
 
-func (module *DNSModule) makeAllSRV(entry *dbEntry) []dns.RR {
+func (module *DNSModule) makeAllSRV(name string, entry *dbEntry) []dns.RR {
 	var result []dns.RR
 
 	for _, task := range entry.app.Backends {
 		rr := &dns.SRV{
 			Hdr: dns.RR_Header{
 				Ttl:    uint32(module.DNSTTL.Seconds()),
-				Name:   module.BaseName,
+				Name:   name,
 				Class:  dns.ClassINET,
 				Rrtype: dns.TypeSRV,
 			},
