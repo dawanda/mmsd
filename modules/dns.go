@@ -85,6 +85,7 @@ func (module *DNSModule) Shutdown() {
 
 // Apply bootstrap the data store from list of AppCluster
 func (module *DNSModule) Apply(apps []*core.AppCluster) {
+	log.Printf("DNS Apply : initialize %d apps", len(apps))
 	module.dbMutex.Lock()
 	module.db = make(map[string]*dbEntry)
 	module.dbMutex.Unlock()
