@@ -397,7 +397,7 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 
 	serverOpts := ""
 
-	if manager.LocalHealthChecks {
+	if manager.LocalHealthChecks && portDef.Labels["disable-haproxy-health-check"] != "true" {
 		serverOpts += " check"
 	}
 
