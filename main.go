@@ -84,10 +84,11 @@ type mmsdService struct {
 	GatewayPortHTTPS uint
 
 	// tcp load balancing (haproxy)
-	TCPEnabled     bool
-	HaproxyBin     string
-	HaproxyTailCfg string
-	HaproxyPort    uint
+	TCPEnabled            bool
+	HaproxyBin            string
+	HaproxyTailCfg        string
+	HaproxyPort           uint
+	HaproxyReloadInterval time.Duration
 
 	// udp load balancing
 	UDPEnabled bool
@@ -470,6 +471,7 @@ func (mmsd *mmsdService) Run() {
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.IPVar(&mmsd.ServiceAddr, "haproxy-bind", mmsd.ServiceAddr, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
+	flag.DurationVar(&mmsd.HaproxyReloadInterval, "haproxy-reload-interval", mmsd.HaproxyReloadInterval, "Interval between reload haproxy for bulk changes; default 5s")
 	flag.BoolVar(&mmsd.DnsEnabled, "enable-dns", mmsd.DnsEnabled, "Enables DNS-based service discovery")
 	flag.UintVar(&mmsd.DnsPort, "dns-port", mmsd.DnsPort, "DNS service discovery port")
 	flag.BoolVar(&mmsd.DnsPushSRV, "dns-push-srv", mmsd.DnsPushSRV, "DNS service discovery to also push SRV on A")
@@ -537,6 +539,7 @@ func (mmsd *mmsdService) setupHandlers() {
 			AdminSockPath:     filepath.Join(mmsd.RunStateDir, "haproxy.sock"),
 			ManagementAddr:    mmsd.ManagementAddr,
 			ManagementPort:    mmsd.HaproxyPort,
+			ReloadInterval:    mmsd.HaproxyReloadInterval,
 		})
 	}
 
@@ -574,33 +577,34 @@ func locateExe(name string) string {
 
 func main() {
 	var mmsd = mmsdService{
-		MarathonScheme:    "http",
-		MarathonIP:        net.ParseIP("127.0.0.1"),
-		MarathonPort:      8080,
-		ReconnectDelay:    time.Second * 4,
-		RunStateDir:       "/var/run/mmsd",
-		FilterGroups:      "*",
-		GatewayEnabled:    false,
-		GatewayAddr:       net.ParseIP("0.0.0.0"),
-		GatewayPortHTTP:   80,
-		GatewayPortHTTPS:  443,
-		FilesEnabled:      true,
-		UDPEnabled:        true,
-		TCPEnabled:        true,
-		LocalHealthChecks: true,
-		HaproxyBin:        locateExe("haproxy"),
-		HaproxyTailCfg:    "/etc/mmsd/haproxy-tail.cfg",
-		HaproxyPort:       8081,
-		ManagementAddr:    net.ParseIP("0.0.0.0"),
-		ServiceAddr:       net.ParseIP("0.0.0.0"),
-		HttpApiPort:       8082,
-		Verbose:           false,
-		DnsEnabled:        false,
-		DnsPort:           53,
-		DnsPushSRV:        false,
-		DnsBaseName:       "mmsd.",
-		DnsTTL:            time.Second * 5,
-		quitChannel:       make(chan bool),
+		MarathonScheme:        "http",
+		MarathonIP:            net.ParseIP("127.0.0.1"),
+		MarathonPort:          8080,
+		ReconnectDelay:        time.Second * 4,
+		RunStateDir:           "/var/run/mmsd",
+		FilterGroups:          "*",
+		GatewayEnabled:        false,
+		GatewayAddr:           net.ParseIP("0.0.0.0"),
+		GatewayPortHTTP:       80,
+		GatewayPortHTTPS:      443,
+		FilesEnabled:          true,
+		UDPEnabled:            true,
+		TCPEnabled:            true,
+		LocalHealthChecks:     true,
+		HaproxyBin:            locateExe("haproxy"),
+		HaproxyTailCfg:        "/etc/mmsd/haproxy-tail.cfg",
+		HaproxyPort:           8081,
+		HaproxyReloadInterval: time.Second * 5,
+		ManagementAddr:        net.ParseIP("0.0.0.0"),
+		ServiceAddr:           net.ParseIP("0.0.0.0"),
+		HttpApiPort:           8082,
+		Verbose:               false,
+		DnsEnabled:            false,
+		DnsPort:               53,
+		DnsPushSRV:            false,
+		DnsBaseName:           "mmsd.",
+		DnsTTL:                time.Second * 5,
+		quitChannel:           make(chan bool),
 	}
 
 	mmsd.Run()

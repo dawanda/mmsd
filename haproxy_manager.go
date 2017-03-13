@@ -17,7 +17,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/dawanda/go-mesos/marathon"
 )
@@ -39,6 +41,7 @@ type HaproxyMgr struct {
 	PidFile            string
 	ManagementAddr     net.IP
 	ManagementPort     uint
+	ReloadInterval     time.Duration
 	AdminSockPath      string
 	appConfigFragments map[string]string                    // [appId] = haproxy_config_fragment
 	appLabels          map[string]map[string]string         // [appId][key] = value
@@ -47,6 +50,7 @@ type HaproxyMgr struct {
 	vhostDefault       string
 	vhostsHTTPS        map[string][]string
 	vhostDefaultHTTPS  string
+	configWriteMutex   *sync.Mutex
 }
 
 const (
@@ -142,6 +146,21 @@ func makeStringArray(s string) []string {
 }
 
 func (manager *HaproxyMgr) Setup() error {
+	manager.configWriteMutex = &sync.Mutex{}
+	go func() {
+		reloadTicker := time.NewTicker(manager.ReloadInterval)
+
+		for {
+			<-reloadTicker.C
+			manager.configWriteMutex.Lock()
+			err := manager.writeConfig()
+			if err != nil {
+				log.Panic(err)
+			}
+			manager.reloadConfig(false)
+			manager.configWriteMutex.Unlock()
+		}
+	}()
 	return nil
 }
 
@@ -156,6 +175,9 @@ func (manager *HaproxyMgr) SetEnabled(value bool) {
 }
 
 func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
+	manager.configWriteMutex.Lock()
+	defer manager.configWriteMutex.Unlock()
+
 	manager.appConfigFragments = make(map[string]string)
 	manager.clearAppStateCache()
 
@@ -176,15 +198,13 @@ func (manager *HaproxyMgr) Apply(apps []*marathon.App, force bool) error {
 		}
 	}
 
-	err := manager.writeConfig()
-	if err != nil {
-		return err
-	}
-
-	return manager.reloadConfig(false)
+	return nil
 }
 
 func (manager *HaproxyMgr) Remove(appID string, taskID string, app *marathon.App) error {
+	manager.configWriteMutex.Lock()
+	defer manager.configWriteMutex.Unlock()
+
 	if app != nil {
 		// make sure we *remove* the task from the cluster
 		config, err := manager.makeConfig(app)
@@ -204,12 +224,7 @@ func (manager *HaproxyMgr) Remove(appID string, taskID string, app *marathon.App
 	}
 	manager.removeAppStateCacheEntry(appID, taskID)
 
-	err := manager.writeConfig()
-	if err != nil {
-		return err
-	}
-
-	return manager.reloadConfig(false)
+	return nil
 }
 
 func isAppJustSpawned(app *marathon.App) bool {
@@ -230,6 +245,9 @@ func isAppJustSpawned(app *marathon.App) bool {
 }
 
 func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
+	manager.configWriteMutex.Lock()
+	defer manager.configWriteMutex.Unlock()
+
 	// collect list of task labels as we formatted them in haproxy.cfg.
 	var instanceNames []string
 	for portIndex, servicePort := range app.Ports {
@@ -256,11 +274,6 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 		manager.setAppStateCacheEntry(&task)
 	}
 
-	err = manager.writeConfig()
-	if err != nil {
-		return err
-	}
-
 	task := app.GetTaskById(taskID)
 
 	// go right away reload the config if that is the first start of the
@@ -270,7 +283,7 @@ func (manager *HaproxyMgr) Update(app *marathon.App, taskID string) error {
 		if len(app.HealthChecks) == 0 || isAppJustSpawned(app) {
 			log.Printf("[haproxy] App %v on host %v becomes healthy (or alive) first time. force reload config.\n",
 				app.Id, task.Host)
-			return manager.reloadConfig(false)
+			return nil
 		}
 	}
 
