@@ -41,6 +41,7 @@ type HaproxyMgr struct {
 	PidFile            string
 	ManagementAddr     net.IP
 	ManagementPort     uint
+	ReloadInterval     time.Duration
 	AdminSockPath      string
 	appConfigFragments map[string]string                    // [appId] = haproxy_config_fragment
 	appLabels          map[string]map[string]string         // [appId][key] = value
@@ -147,7 +148,7 @@ func makeStringArray(s string) []string {
 func (manager *HaproxyMgr) Setup() error {
 	manager.configWriteMutex = &sync.Mutex{}
 	go func() {
-		reloadTicker := time.NewTicker(5 * time.Second)
+		reloadTicker := time.NewTicker(manager.ReloadInterval)
 
 		for {
 			<-reloadTicker.C
