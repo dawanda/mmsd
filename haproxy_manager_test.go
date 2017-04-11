@@ -6,42 +6,71 @@ import (
 	"github.com/dawanda/go-mesos/marathon"
 )
 
+type instanceSpec struct {
+	Host  string
+	Ports []uint
+}
+
+func mockApp(instanceSpecs []instanceSpec) (app marathon.App) {
+	for i, _ := range instanceSpecs {
+		app.Tasks = append(app.Tasks, marathon.Task{
+			Host:  instanceSpecs[i].Host,
+			Ports: instanceSpecs[i].Ports,
+		})
+	}
+	return
+}
+
+func joinHosts(tasks []marathon.Task) (hosts string) {
+	for _, task := range tasks {
+		hosts = hosts + task.Host
+	}
+	return
+}
+
 func TestSortTasks(t *testing.T) {
-	app := marathon.App{
-		Tasks: []marathon.Task{
-			marathon.Task{
-				Host:  "ccc",
-				Ports: []uint{80},
-			},
-			marathon.Task{
-				Host:  "aaa",
-				Ports: []uint{80},
-			},
+	var tests = []struct {
+		app       marathon.App
+		portIndex int
+		result    string
+		message   string
+	}{
+		{
+			mockApp([]instanceSpec{
+				instanceSpec{"ccc", []uint{80}},
+				instanceSpec{"aaa", []uint{80}},
+			}),
+			0,
+			"aaaccc",
+			"Simple compare",
+		},
+		{
+			mockApp([]instanceSpec{
+				instanceSpec{"ccc", []uint{80}},
+				instanceSpec{"aaa", []uint{80}},
+				instanceSpec{"bbb", []uint{80, 443}},
+			}),
+			0,
+			"aaabbbccc",
+			"New instance added",
+		},
+		{
+			mockApp([]instanceSpec{
+				instanceSpec{"ccc", []uint{80}},
+				instanceSpec{"aaa", []uint{80}},
+				instanceSpec{"bbb", []uint{80, 443}},
+			}),
+			1,
+			"aaabbbccc",
+			"Number of ports mismatch between tasks",
 		},
 	}
-	t.Log("Simple compare")
-	sorted := sortTasks(app.Tasks, 0)
 
-	if sorted[0].Host+sorted[1].Host != "aaaccc" {
-		t.Error("Expect 'aaa ccc' to be order for port index 0, result:", sorted[0].Host, sorted[1].Host)
-	}
-
-	app.Tasks = append(app.Tasks, marathon.Task{
-		Host:  "bbb",
-		Ports: []uint{80, 443},
-	})
-
-	t.Log("Compare after new instance added")
-	sorted = sortTasks(app.Tasks, 0)
-
-	if sorted[0].Host+sorted[1].Host+sorted[2].Host != "aaabbbccc" {
-		t.Error("Expect 'aaa bbb ccc' to be order for port index 0, result:", sorted[0].Host, sorted[1].Host, sorted[2].Host)
-	}
-
-	t.Log("Compare a new added port")
-	sorted = sortTasks(app.Tasks, 1)
-
-	if sorted[0].Host+sorted[1].Host+sorted[2].Host != "aaabbbccc" {
-		t.Error("Expect 'aaa bbb ccc' to be order for port index 1, result:", sorted[0].Host, sorted[1].Host, sorted[2].Host)
+	for _, test := range tests {
+		t.Log(test.message)
+		sorted := sortTasks(test.app.Tasks, test.portIndex)
+		if joinHosts(sorted) != test.result {
+			t.Errorf("Expect '%s' to be order for port index %d, result: %s", test.result, test.portIndex, joinHosts(sorted))
+		}
 	}
 }
