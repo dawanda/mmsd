@@ -400,10 +400,6 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 	result := ""
 	bindOpts := ""
 
-	if runtime.GOOS == "linux" { // only enable on Linux (known to work)
-		bindOpts += " defer-accept"
-	}
-
 	if Atoi(portDef.Labels[LB_ACCEPT_PROXY], 0) != 0 {
 		bindOpts += " accept-proxy"
 	}
