@@ -6,21 +6,6 @@ import (
 	"github.com/dawanda/go-mesos/marathon"
 )
 
-type instanceSpec struct {
-	Host  string
-	Ports []uint
-}
-
-func mockApp(instanceSpecs []instanceSpec) (app marathon.App) {
-	for i, _ := range instanceSpecs {
-		app.Tasks = append(app.Tasks, marathon.Task{
-			Host:  instanceSpecs[i].Host,
-			Ports: instanceSpecs[i].Ports,
-		})
-	}
-	return
-}
-
 func joinHosts(tasks []marathon.Task) (hosts string) {
 	for _, task := range tasks {
 		hosts = hosts + task.Host
@@ -36,30 +21,39 @@ func TestSortTasks(t *testing.T) {
 		message   string
 	}{
 		{
-			mockApp([]instanceSpec{
-				instanceSpec{"ccc", []uint{80}},
-				instanceSpec{"aaa", []uint{80}},
-			}),
+			mockApp(
+				"/test/foo",
+				[]uint{80},
+				[]instanceSpec{
+					instanceSpec{"ccc", []uint{80}},
+					instanceSpec{"aaa", []uint{80}},
+				}),
 			0,
 			"aaaccc",
 			"Simple compare",
 		},
 		{
-			mockApp([]instanceSpec{
-				instanceSpec{"ccc", []uint{80}},
-				instanceSpec{"aaa", []uint{80}},
-				instanceSpec{"bbb", []uint{80, 443}},
-			}),
+			mockApp(
+				"/test/foo",
+				[]uint{80},
+				[]instanceSpec{
+					instanceSpec{"ccc", []uint{80}},
+					instanceSpec{"aaa", []uint{80}},
+					instanceSpec{"bbb", []uint{80, 443}},
+				}),
 			0,
 			"aaabbbccc",
 			"New instance added",
 		},
 		{
-			mockApp([]instanceSpec{
-				instanceSpec{"ccc", []uint{80}},
-				instanceSpec{"aaa", []uint{80}},
-				instanceSpec{"bbb", []uint{80, 443}},
-			}),
+			mockApp(
+				"/test/foo",
+				[]uint{80, 443},
+				[]instanceSpec{
+					instanceSpec{"ccc", []uint{80}},
+					instanceSpec{"aaa", []uint{80}},
+					instanceSpec{"bbb", []uint{80, 443}},
+				}),
 			1,
 			"aaabbbccc",
 			"Number of ports mismatch between tasks",
