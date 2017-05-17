@@ -2,3 +2,5 @@
 /run
 /environ
 /mmsd
+*.instances
+*.cfg

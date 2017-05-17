@@ -121,6 +121,9 @@ func (upstream *FilesManager) writeFile(filename string, appId string,
 	b.WriteString("\r\n")
 
 	for _, task := range app.Tasks {
+		if portIndex >= len(task.Ports) {
+			continue
+		}
 		b.WriteString(fmt.Sprintf("%v:%v\n", task.Host, task.Ports[portIndex]))
 	}
 
