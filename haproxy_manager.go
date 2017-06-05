@@ -61,10 +61,6 @@ const (
 	LB_VHOST_DEFAULT_HTTPS = "lb-vhost-default-ssl"
 )
 
-var (
-	ErrBadExit = errors.New("Bad Process Exit.")
-)
-
 // {{{ SortedVhostsKeys
 type sortedVhosts struct {
 	m map[string][]string
@@ -787,7 +783,7 @@ func (manager *HaproxyMgr) exec(logMessage string, args ...string) error {
 	exitCode := proc.ProcessState.Sys().(syscall.WaitStatus)
 	if exitCode != 0 {
 		log.Printf("[haproxy] Bad exit code %v.\n", exitCode)
-		err = ErrBadExit
+		return errors.New(string(output))
 	}
 
 	if len(output) != 0 && manager.Verbose {
