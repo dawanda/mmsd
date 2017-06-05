@@ -1,0 +1,10 @@
+FROM golang:1.7.5-wheezy
+MAINTAINER Martin <mbormeister@dawanda.com>
+
+RUN apt-get update && apt-get install -y git && go get github.com/tools/godep
+
+ADD . /go/src/github.com/dawanda/mmsd
+RUN cd /go/src/github.com/dawanda/mmsd && godep restore && go install
+
+ENTRYPOINT ["/go/bin/mmsd"]
+CMD ["--help"]
