@@ -1,10 +1,11 @@
 {
 	"ImportPath": "github.com/dawanda/mmsd",
 	"GoVersion": "go1.6",
+	"GodepVersion": "v75",
 	"Deps": [
 		{
 			"ImportPath": "github.com/dawanda/go-mesos/marathon",
-			"Rev": "634b983f5f2ee0df438dcfb9fdbd64dd7591223d"
+			"Rev": "1946224e92ebc863baf64f4ce29e5bce7b354f25"
 		},
 		{
 			"ImportPath": "github.com/gorilla/context",

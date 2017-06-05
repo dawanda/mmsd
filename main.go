@@ -318,6 +318,17 @@ func (mmsd *mmsdService) setupEventBusListener() {
 		}
 	})
 
+	sse.AddEventListener("app_terminated_event", func(data string) {
+		var event marathon.AppTerminatedEvent
+		err := json.Unmarshal([]byte(data), &event)
+		if err != nil {
+			log.Printf("Failed to unmarshal app_terminated_event. %v\n", err)
+			log.Printf("app_terminated_event: %+v\n", data)
+		} else {
+			mmsd.appTerminatedEvent(&event)
+		}
+	})
+
 	go sse.RunForever()
 }
 
@@ -346,6 +357,10 @@ func (mmsd *mmsdService) statusUpdateEvent(event *marathon.StatusUpdateEvent) {
 		}
 		mmsd.Remove(event.AppId, event.TaskId, app)
 	}
+}
+
+func (mmsd *mmsdService) appTerminatedEvent(event *marathon.AppTerminatedEvent) {
+	mmsd.Remove(event.AppId, "", nil)
 }
 
 func (mmsd *mmsdService) healthStatusChangedEvent(event *marathon.HealthStatusChangedEvent) {
