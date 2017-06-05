@@ -43,6 +43,8 @@ type HaproxyMgr struct {
 	AdminSockPath      string
 	BeforeCmd          string
 	AfterCmd           string
+	ReuseSocketPath    string
+	EnableReuseSocket  bool
 	appConfigFragments map[string]string                    // [appId] = haproxy_config_fragment
 	appLabels          map[string]map[string]string         // [appId][key] = value
 	appStateCache      map[string]map[string]*marathon.Task // [appId][task] = Task
@@ -690,20 +692,36 @@ func (manager *HaproxyMgr) checkConfig(path string) error {
 		"-f", path, "-p", manager.PidFile, "-c")
 }
 
+func (manager HaproxyMgr) startArguments() []string {
+	args := []string{"-f", manager.ConfigPath, "-p", manager.PidFile, "-D", "-q"}
+	if manager.EnableReuseSocket {
+		args = append(args, "-x", manager.ReuseSocketPath)
+	}
+	return args
+}
+
 func (manager *HaproxyMgr) startProcess() error {
 	defer manager.afterHook()
 	manager.beforeHook()
 
-	return manager.exec("starting up process",
-		"-f", manager.ConfigPath, "-p", manager.PidFile, "-D", "-q")
+	return manager.exec("starting up process", manager.startArguments()...)
+}
+
+func (manager HaproxyMgr) reloadArguments(pid int) []string {
+	args := []string{"-f", manager.ConfigPath, "-p", manager.PidFile}
+	if manager.EnableReuseSocket {
+		args = append(args, "-x", manager.ReuseSocketPath)
+	} else {
+		args = append(args, "-sf", fmt.Sprint(pid))
+	}
+	return args
 }
 
 func (manager *HaproxyMgr) reloadProcess(pid int) error {
 	defer manager.afterHook()
 	manager.beforeHook()
 
-	return manager.exec("reloading configuration",
-		"-f", manager.ConfigPath, "-p", manager.PidFile, "-D", "-sf", fmt.Sprint(pid))
+	return manager.exec("reloading configuration", manager.reloadArguments(pid)...)
 }
 
 func (manager *HaproxyMgr) exec(logMessage string, args ...string) error {
