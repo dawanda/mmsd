@@ -705,11 +705,9 @@ func (manager *HaproxyMgr) startProcess() error {
 }
 
 func (manager HaproxyMgr) reloadArguments(pid int) []string {
-	args := []string{"-f", manager.ConfigPath, "-p", manager.PidFile, "-D"}
+	args := []string{"-f", manager.ConfigPath, "-p", manager.PidFile, "-D", "-sf", fmt.Sprint(pid)}
 	if manager.EnableReuseSocket {
 		args = append(args, "-x", manager.AdminSockPath)
-	} else {
-		args = append(args, "-sf", fmt.Sprint(pid))
 	}
 	return args
 }
