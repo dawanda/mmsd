@@ -693,7 +693,7 @@ func (manager *HaproxyMgr) checkConfig(path string) error {
 }
 
 func (manager HaproxyMgr) startArguments() []string {
-	args := []string{"-f", manager.ConfigPath, "-p", manager.PidFile, "-D", "-q"}
+	args := []string{"-f", manager.ConfigPath, "-p", manager.PidFile, "-D"}
 	return args
 }
 
@@ -705,7 +705,7 @@ func (manager *HaproxyMgr) startProcess() error {
 }
 
 func (manager HaproxyMgr) reloadArguments(pid int) []string {
-	args := []string{"-f", manager.ConfigPath, "-p", manager.PidFile}
+	args := []string{"-f", manager.ConfigPath, "-p", manager.PidFile, "-D"}
 	if manager.EnableReuseSocket {
 		args = append(args, "-x", manager.AdminSockPath)
 	} else {
