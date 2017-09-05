@@ -482,18 +482,21 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 		// The latter is kept for backwards compatibility with older
 		// Marathon services
 		if task.State == nil || *task.State == marathon.TaskRunning {
-			result += fmt.Sprintf(
-				"  server %v:%v %v:%v%v\n",
-				task.Host, task.Ports[portIndex], // taskLabel == "$host:$port"
-				SoftResolveIPAddr(task.Host),
-				task.Ports[portIndex],
-				serverOpts)
+			if len(task.Ports) > portIndex {
+				result += upstreamServerConfig(task.Host, task.Ports[portIndex], serverOpts)
+			}
 		}
 	}
 
 	result += "\n"
 
 	return result
+}
+
+func upstreamServerConfig(host string, port uint, serverOpts string) string {
+	return fmt.Sprintf(
+		"  server %[1]v:%[2]v %[3]v:%[2]v%[4]v\n",
+		host, port, SoftResolveIPAddr(host), serverOpts)
 }
 
 func (manager *HaproxyMgr) writeConfig() error {
