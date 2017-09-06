@@ -458,7 +458,7 @@ func (mmsd *mmsdService) MaybeResetFromTasks(force bool) error {
 	return nil
 }
 
-const appVersion = "0.9.22"
+const appVersion = "0.9.23"
 const appLicense = "MIT"
 
 func showVersion() {
