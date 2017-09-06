@@ -738,28 +738,29 @@ func (manager *HaproxyMgr) makeConfigTail() (string, error) {
 }
 
 func (manager *HaproxyMgr) reloadConfig(force bool) error {
-	if !force && FileIsIdentical(manager.ConfigPath, manager.OldConfigPath) {
-		log.Printf("[haproxy] config file not changed. ignoring reload\n")
-		return nil
-	}
-
 	pidStr, err := ioutil.ReadFile(manager.PidFile)
+	// Always start Haproxy if the pid file is missing
 	if err != nil {
 		return manager.startProcess()
 	}
+
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidStr)))
 	if err != nil {
 		return err
 	}
 
 	err = syscall.Kill(pid, syscall.Signal(0))
+	// process doesn't exist
 	if err != nil {
-		// process doesn't exist; start up process
 		return manager.startProcess()
-	} else {
-		// process does exist; send SIGHUP to reload
+	}
+
+	// process does exist and config file changed
+	if !FileIsIdentical(manager.ConfigPath, manager.OldConfigPath) {
 		return manager.reloadProcess(pid)
 	}
+
+	return nil
 }
 
 func (manager *HaproxyMgr) checkConfig(path string) error {
