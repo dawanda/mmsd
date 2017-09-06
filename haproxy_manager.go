@@ -42,6 +42,8 @@ type HaproxyMgr struct {
 	ManagementPort     uint
 	ReloadInterval     time.Duration
 	AdminSockPath      string
+	BeforeCmd          string
+	AfterCmd           string
 	appConfigFragments map[string]string                    // [appId] = haproxy_config_fragment
 	appLabels          map[string]map[string]string         // [appId][key] = value
 	appStateCache      map[string]map[string]*marathon.Task // [appId][task] = Task
@@ -769,11 +771,17 @@ func (manager *HaproxyMgr) checkConfig(path string) error {
 }
 
 func (manager *HaproxyMgr) startProcess() error {
+	defer manager.afterHook()
+	manager.beforeHook()
+
 	return manager.exec("starting up process",
 		"-f", manager.ConfigPath, "-p", manager.PidFile, "-D", "-q")
 }
 
 func (manager *HaproxyMgr) reloadProcess(pid int) error {
+	defer manager.afterHook()
+	manager.beforeHook()
+
 	return manager.exec("reloading configuration",
 		"-f", manager.ConfigPath, "-p", manager.PidFile, "-D", "-sf", fmt.Sprint(pid))
 }
@@ -796,6 +804,28 @@ func (manager *HaproxyMgr) exec(logMessage string, args ...string) error {
 	}
 
 	return err
+}
+
+func (manager *HaproxyMgr) beforeHook() {
+	manager.execHook(manager.BeforeCmd, "before")
+}
+
+func (manager *HaproxyMgr) afterHook() {
+	manager.execHook(manager.AfterCmd, "after")
+}
+
+func (manager *HaproxyMgr) execHook(cmd string, arg string) {
+	if cmd == "" {
+		return
+	}
+	output, err := exec.Command(cmd, arg).CombinedOutput()
+	if err != nil {
+		log.Println("[haproxy] execHook error:", err)
+		return
+	}
+	if len(output) != 0 {
+		log.Printf("[haproxy] execHook: %s\n", string(output))
+	}
 }
 
 func (manager *HaproxyMgr) clearAppStateCache() {

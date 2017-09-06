@@ -89,6 +89,8 @@ type mmsdService struct {
 	HaproxyTailCfg        string
 	HaproxyPort           uint
 	HaproxyReloadInterval time.Duration
+	HaproxyBeforeCmd      string
+	HaproxyAfterCmd       string
 
 	// udp load balancing
 	UDPEnabled bool
@@ -487,6 +489,8 @@ func (mmsd *mmsdService) Run() {
 	flag.IPVar(&mmsd.ServiceAddr, "haproxy-bind", mmsd.ServiceAddr, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
 	flag.DurationVar(&mmsd.HaproxyReloadInterval, "haproxy-reload-interval", mmsd.HaproxyReloadInterval, "Interval between reload haproxy for bulk changes; default 5s")
+	flag.StringVar(&mmsd.HaproxyBeforeCmd, "haproxy-before-cmd", mmsd.HaproxyBeforeCmd, "Command to execute before Haproxy start/reload")
+	flag.StringVar(&mmsd.HaproxyAfterCmd, "haproxy-after-cmd", mmsd.HaproxyAfterCmd, "Command to execute after Haproxy start/reload")
 	flag.BoolVar(&mmsd.DnsEnabled, "enable-dns", mmsd.DnsEnabled, "Enables DNS-based service discovery")
 	flag.UintVar(&mmsd.DnsPort, "dns-port", mmsd.DnsPort, "DNS service discovery port")
 	flag.BoolVar(&mmsd.DnsPushSRV, "dns-push-srv", mmsd.DnsPushSRV, "DNS service discovery to also push SRV on A")
@@ -555,6 +559,8 @@ func (mmsd *mmsdService) setupHandlers() {
 			ManagementAddr:    mmsd.ManagementAddr,
 			ManagementPort:    mmsd.HaproxyPort,
 			ReloadInterval:    mmsd.HaproxyReloadInterval,
+			BeforeCmd:         mmsd.HaproxyBeforeCmd,
+			AfterCmd:          mmsd.HaproxyAfterCmd,
 		})
 	}
 
