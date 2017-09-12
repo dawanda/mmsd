@@ -180,3 +180,11 @@ func Hash(s string) uint32 {
 	h.Write([]byte(s))
 	return h.Sum32()
 }
+
+func makeStringArray(s string) []string {
+	if len(s) == 0 {
+		return []string{}
+	} else {
+		return strings.Split(s, ",")
+	}
+}
