@@ -111,6 +111,7 @@ func (mmsd *mmsdService) setupHttpService() {
 	v1 := router.PathPrefix("/v1").Subrouter()
 	v1.HandleFunc("/apps", mmsd.v1Apps).Methods("GET")
 	v1.HandleFunc("/instances{app_id:/.*}", mmsd.v1Instances).Methods("GET")
+	v1.HandleFunc("/service_ports{app_id:/.*}", mmsd.v1ServicePorts).Methods("GET")
 
 	serviceAddr := fmt.Sprintf("%v:%v", mmsd.ServiceAddr, mmsd.HttpApiPort)
 	log.Printf("Exposing service API on http://%v\n", serviceAddr)
@@ -269,6 +270,34 @@ func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
 
 	for _, entry := range list {
 		fmt.Fprintln(w, entry)
+	}
+}
+
+func (mmsd *mmsdService) v1ServicePorts(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	appID := vars["app_id"]
+
+	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("NewService error. %v\n", err)
+		return
+	}
+
+	app, err := m.GetApp(appID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("GetApp error. %v\n", err)
+		return
+	}
+
+	if app == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	for _, port := range app.Ports {
+		fmt.Fprintln(w, port)
 	}
 }
 
