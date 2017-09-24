@@ -25,19 +25,20 @@ func PrettifyDnsName(dns string) string {
 	return strings.SplitN(dns, ".", 1)[0]
 }
 
-var resolveMap = make(map[string]string)
-
 func SoftResolveIPAddr(dns string) string {
-	if value, ok := resolveMap[dns]; ok {
-		return value
-	}
-
 	if ip, err := net.ResolveIPAddr("ip", dns); err == nil {
 		return ip.String()
 	} else {
 		// fallback to actual dns name
 		return dns
 	}
+}
+
+func resolveIPAddr(dns string, skip bool) string {
+	if skip {
+		return dns
+	}
+	return SoftResolveIPAddr(dns)
 }
 
 // http://stackoverflow.com/a/30038571/386670
@@ -187,4 +188,48 @@ func makeStringArray(s string) []string {
 	} else {
 		return strings.Split(s, ",")
 	}
+}
+
+func parseRange(input string) (int, int, error) {
+	if len(input) == 0 {
+		return 0, 0, nil
+	}
+
+	vals := strings.Split(input, ":")
+	log.Printf("vals: %+q\n", vals)
+
+	if len(vals) == 1 {
+		i, err := strconv.Atoi(input)
+		return i, i, err
+	}
+
+	if len(vals) > 2 {
+		return 0, 0, ErrInvalidPortRange
+	}
+
+	var (
+		begin int
+		end   int
+		err   error
+	)
+
+	// parse begin
+	if vals[0] != "" {
+		begin, err = strconv.Atoi(vals[0])
+		if err != nil {
+			return begin, end, err
+		}
+	}
+
+	// parse end
+	if vals[1] != "" {
+		end, err = strconv.Atoi(vals[1])
+		if begin > end {
+			return begin, end, ErrInvalidPortRange
+		}
+	} else {
+		end = -1 // XXX that is: until the end
+	}
+
+	return begin, end, err
 }

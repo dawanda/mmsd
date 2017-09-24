@@ -34,7 +34,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -101,63 +100,6 @@ type mmsdService struct {
 }
 
 var ErrInvalidPortRange = errors.New("Invalid port range")
-
-func parseRange(input string) (int, int, error) {
-	if len(input) == 0 {
-		return 0, 0, nil
-	}
-
-	vals := strings.Split(input, ":")
-	log.Printf("vals: %+q\n", vals)
-
-	if len(vals) == 1 {
-		i, err := strconv.Atoi(input)
-		return i, i, err
-	}
-
-	if len(vals) > 2 {
-		return 0, 0, ErrInvalidPortRange
-	}
-
-	var (
-		begin int
-		end   int
-		err   error
-	)
-
-	// parse begin
-	if vals[0] != "" {
-		begin, err = strconv.Atoi(vals[0])
-		if err != nil {
-			return begin, end, err
-		}
-	}
-
-	// parse end
-	if vals[1] != "" {
-		end, err = strconv.Atoi(vals[1])
-		if begin > end {
-			return begin, end, ErrInvalidPortRange
-		}
-	} else {
-		end = -1 // XXX that is: until the end
-	}
-
-	return begin, end, err
-}
-
-func resolveIPAddr(dns string, skip bool) string {
-	if skip {
-		return dns
-	} else {
-		ip, err := net.ResolveIPAddr("ip", dns)
-		if err != nil {
-			return dns
-		} else {
-			return ip.String()
-		}
-	}
-}
 
 func (mmsd *mmsdService) setupEventBusListener() {
 	var url = fmt.Sprintf("http://%v:%v/v2/events",
