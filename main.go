@@ -49,7 +49,6 @@ type mmsdHandler interface {
 }
 
 type mmsdService struct {
-	HttpApiPort       uint
 	Verbose           bool
 	Handlers          []mmsdHandler
 	quitChannel       chan bool
@@ -285,6 +284,7 @@ func showVersion() {
 }
 
 func (mmsd *mmsdService) Run() {
+	var apiPort uint = 8082
 	flag.BoolVarP(&mmsd.Verbose, "verbose", "v", mmsd.Verbose, "Set verbosity level")
 	flag.IPVar(&mmsd.MarathonIP, "marathon-ip", mmsd.MarathonIP, "Marathon endpoint TCP IP address")
 	flag.UintVar(&mmsd.MarathonPort, "marathon-port", mmsd.MarathonPort, "Marathon endpoint TCP port number")
@@ -292,6 +292,7 @@ func (mmsd *mmsdService) Run() {
 	flag.StringVar(&mmsd.RunStateDir, "run-state-dir", mmsd.RunStateDir, "Path to directory to keep run-state")
 	flag.StringVar(&mmsd.FilterGroups, "filter-groups", mmsd.FilterGroups, "Application group filter")
 	flag.IPVar(&mmsd.ManagedIP, "managed-ip", mmsd.ManagedIP, "IP-address to manage for mmsd")
+	flag.UintVar(&apiPort, "api-port", apiPort, "MMSD API TCP port")
 	flag.BoolVar(&mmsd.GatewayEnabled, "enable-gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.IPVar(&mmsd.GatewayAddr, "gateway-bind", mmsd.GatewayAddr, "gateway bind address")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-port-http", mmsd.GatewayPortHTTP, "gateway port for HTTP")
@@ -330,7 +331,7 @@ func (mmsd *mmsdService) Run() {
 
 	mmsd.setupHandlers()
 	mmsd.setupEventBusListener()
-	NewAPI(appVersion, mmsd.MarathonIP, mmsd.MarathonPort, mmsd.ServiceAddr, mmsd.HttpApiPort)
+	NewAPI(appVersion, mmsd.MarathonIP, mmsd.MarathonPort, mmsd.ServiceAddr, apiPort)
 
 	<-mmsd.quitChannel
 }
@@ -434,7 +435,6 @@ func main() {
 		HaproxyReloadInterval: time.Second * 5,
 		ManagementAddr:        net.ParseIP("0.0.0.0"),
 		ServiceAddr:           net.ParseIP("0.0.0.0"),
-		HttpApiPort:           8082,
 		Verbose:               false,
 		DnsEnabled:            false,
 		DnsPort:               53,
