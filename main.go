@@ -55,13 +55,9 @@ type mmsdService struct {
 	RunStateDir       string
 	FilterGroups      string
 	LocalHealthChecks bool
-	ManagementAddr    net.IP
 
-	// common application service discovery configuration
-	ServiceAddr net.IP
-
-	// service discovery IP-management
-	ManagedIP net.IP
+	// IP for handlers to bind
+	BindIP net.IP
 
 	// file based service discovery
 	FilesEnabled bool
@@ -291,7 +287,7 @@ func (mmsd *mmsdService) Run() {
 	flag.DurationVar(&mmsd.ReconnectDelay, "reconnect-delay", mmsd.ReconnectDelay, "Marathon reconnect delay")
 	flag.StringVar(&mmsd.RunStateDir, "run-state-dir", mmsd.RunStateDir, "Path to directory to keep run-state")
 	flag.StringVar(&mmsd.FilterGroups, "filter-groups", mmsd.FilterGroups, "Application group filter")
-	flag.IPVar(&mmsd.ManagedIP, "managed-ip", mmsd.ManagedIP, "IP-address to manage for mmsd")
+	flag.IPVar(&mmsd.BindIP, "bind-ip", mmsd.BindIP, "IP address for handlers to bind")
 	flag.UintVar(&apiPort, "api-port", apiPort, "MMSD API TCP port")
 	flag.BoolVar(&mmsd.GatewayEnabled, "enable-gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.IPVar(&mmsd.GatewayAddr, "gateway-bind", mmsd.GatewayAddr, "gateway bind address")
@@ -303,7 +299,6 @@ func (mmsd *mmsdService) Run() {
 	flag.BoolVar(&mmsd.LocalHealthChecks, "enable-health-checks", mmsd.LocalHealthChecks, "Enable local health checks (if available) instead of relying on Marathon health checks alone.")
 	flag.StringVar(&mmsd.HaproxyBin, "haproxy-bin", mmsd.HaproxyBin, "path to haproxy binary")
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
-	flag.IPVar(&mmsd.ServiceAddr, "haproxy-bind", mmsd.ServiceAddr, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
 	flag.DurationVar(&mmsd.HaproxyReloadInterval, "haproxy-reload-interval", mmsd.HaproxyReloadInterval, "Interval between reload haproxy for bulk changes; default 5s")
 	flag.StringVar(&mmsd.HaproxyBeforeCmd, "haproxy-before-cmd", mmsd.HaproxyBeforeCmd, "Command to execute before Haproxy start/reload")
@@ -331,7 +326,7 @@ func (mmsd *mmsdService) Run() {
 
 	mmsd.setupHandlers()
 	mmsd.setupEventBusListener()
-	NewAPI(appVersion, mmsd.MarathonIP, mmsd.MarathonPort, mmsd.ServiceAddr, apiPort)
+	NewAPI(appVersion, mmsd.MarathonIP, mmsd.MarathonPort, mmsd.BindIP, apiPort)
 
 	<-mmsd.quitChannel
 }
@@ -340,7 +335,7 @@ func (mmsd *mmsdService) setupHandlers() {
 	if mmsd.DnsEnabled {
 		mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
 			Verbose:     mmsd.Verbose,
-			ServiceAddr: mmsd.ServiceAddr,
+			ServiceAddr: mmsd.BindIP,
 			ServicePort: mmsd.DnsPort,
 			PushSRV:     mmsd.DnsPushSRV,
 			BaseName:    mmsd.DnsBaseName,
@@ -350,7 +345,7 @@ func (mmsd *mmsdService) setupHandlers() {
 
 	if mmsd.UDPEnabled {
 		mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(
-			mmsd.ServiceAddr,
+			mmsd.BindIP,
 			mmsd.Verbose,
 			mmsd.UDPEnabled,
 		))
@@ -362,7 +357,7 @@ func (mmsd *mmsdService) setupHandlers() {
 			Verbose:           mmsd.Verbose,
 			LocalHealthChecks: mmsd.LocalHealthChecks,
 			FilterGroups:      strings.Split(mmsd.FilterGroups, ","),
-			ServiceAddr:       mmsd.ServiceAddr,
+			Address:           mmsd.BindIP,
 			GatewayEnabled:    mmsd.GatewayEnabled,
 			GatewayAddr:       mmsd.GatewayAddr,
 			GatewayPortHTTP:   mmsd.GatewayPortHTTP,
@@ -373,7 +368,6 @@ func (mmsd *mmsdService) setupHandlers() {
 			OldConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg.old"),
 			PidFile:           filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
 			AdminSockPath:     filepath.Join(mmsd.RunStateDir, "haproxy.sock"),
-			ManagementAddr:    mmsd.ManagementAddr,
 			ManagementPort:    mmsd.HaproxyPort,
 			ReloadInterval:    mmsd.HaproxyReloadInterval,
 			BeforeCmd:         mmsd.HaproxyBeforeCmd,
@@ -433,8 +427,7 @@ func main() {
 		HaproxyTailCfg:        "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:           8081,
 		HaproxyReloadInterval: time.Second * 5,
-		ManagementAddr:        net.ParseIP("0.0.0.0"),
-		ServiceAddr:           net.ParseIP("0.0.0.0"),
+		BindIP:                net.ParseIP("0.0.0.0"),
 		Verbose:               false,
 		DnsEnabled:            false,
 		DnsPort:               53,

@@ -28,7 +28,7 @@ type HaproxyMgr struct {
 	Verbose            bool
 	LocalHealthChecks  bool
 	FilterGroups       []string
-	ServiceAddr        net.IP
+	Address            net.IP
 	GatewayEnabled     bool
 	GatewayAddr        net.IP
 	GatewayPortHTTP    uint
@@ -38,7 +38,6 @@ type HaproxyMgr struct {
 	ConfigTailPath     string
 	OldConfigPath      string
 	PidFile            string
-	ManagementAddr     net.IP
 	ManagementPort     uint
 	ReloadInterval     time.Duration
 	AdminSockPath      string
@@ -285,7 +284,7 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 	var portDef = app.PortDefinitions[portIndex]
 	var servicePort = portDef.Port
 	var appID = PrettifyAppId(app.Id, portIndex, servicePort)
-	var bindAddr = manager.ServiceAddr
+	var bindAddr = manager.Address
 	var healthCheck = GetHealthCheckForPortIndex(app.HealthChecks, portIndex)
 	var appProtocol = GetApplicationProtocol(app, portIndex)
 
@@ -491,7 +490,7 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 			"  stats admin if TRUE\n"+
 			"  monitor-uri /haproxy?monitor\n"+
 			"\n",
-		manager.ManagementAddr, manager.ManagementPort)
+		manager.Address, manager.ManagementPort)
 
 	if manager.GatewayEnabled {
 		gatewayHTTP := manager.makeGatewayHTTP()
