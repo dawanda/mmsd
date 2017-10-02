@@ -483,14 +483,14 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 
 	mgntFragment := fmt.Sprintf(
 		"listen haproxy\n"+
-			"  bind %v:%v\n"+
+			"  bind 0.0.0.0:%v\n"+
 			"  mode http\n"+
 			"  stats enable\n"+
 			"  stats uri /\n"+
 			"  stats admin if TRUE\n"+
 			"  monitor-uri /haproxy?monitor\n"+
 			"\n",
-		manager.Address, manager.ManagementPort)
+		manager.ManagementPort)
 
 	if manager.GatewayEnabled {
 		gatewayHTTP := manager.makeGatewayHTTP()
