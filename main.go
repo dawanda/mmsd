@@ -32,16 +32,12 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/dawanda/go-mesos/marathon"
-	"github.com/gorilla/mux"
 	flag "github.com/ogier/pflag"
 )
 
@@ -53,20 +49,15 @@ type mmsdHandler interface {
 }
 
 type mmsdService struct {
-	HttpApiPort       uint
 	Verbose           bool
 	Handlers          []mmsdHandler
 	quitChannel       chan bool
 	RunStateDir       string
 	FilterGroups      string
 	LocalHealthChecks bool
-	ManagementAddr    net.IP
 
-	// common application service discovery configuration
-	ServiceAddr net.IP
-
-	// service discovery IP-management
-	ManagedIP net.IP
+	// IP for handlers to bind
+	BindIP net.IP
 
 	// file based service discovery
 	FilesEnabled bool
@@ -103,216 +94,7 @@ type mmsdService struct {
 	DnsPushSRV  bool
 }
 
-func (mmsd *mmsdService) setupHttpService() {
-	router := mux.NewRouter()
-	router.HandleFunc("/ping", mmsd.v0Ping)
-	router.HandleFunc("/version", mmsd.v0Version)
-
-	v1 := router.PathPrefix("/v1").Subrouter()
-	v1.HandleFunc("/apps", mmsd.v1Apps).Methods("GET")
-	v1.HandleFunc("/instances{app_id:/.*}", mmsd.v1Instances).Methods("GET")
-	v1.HandleFunc("/service_ports{app_id:/.*}", mmsd.v1ServicePorts).Methods("GET")
-
-	serviceAddr := fmt.Sprintf("%v:%v", mmsd.ServiceAddr, mmsd.HttpApiPort)
-	log.Printf("Exposing service API on http://%v\n", serviceAddr)
-
-	go http.ListenAndServe(serviceAddr, router)
-}
-
-func (mmsd *mmsdService) v0Ping(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "pong\n")
-}
-
-func (mmsd *mmsdService) v0Version(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "mmsd %v\n", appVersion)
-}
-
-func (mmsd *mmsdService) v1Apps(w http.ResponseWriter, r *http.Request) {
-	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
-
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("NewService error. %v\n", err)
-		return
-	}
-
-	apps, err := m.GetApps()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("GetApps error. %v\n", err)
-		return
-	}
-
-	var appList []string
-	for _, app := range apps {
-		appList = append(appList, app.Id)
-	}
-	sort.Strings(appList)
-
-	fmt.Fprintf(w, "%s\n", strings.Join(appList, "\n"))
-}
-
 var ErrInvalidPortRange = errors.New("Invalid port range")
-
-func parseRange(input string) (int, int, error) {
-	if len(input) == 0 {
-		return 0, 0, nil
-	}
-
-	vals := strings.Split(input, ":")
-	log.Printf("vals: %+q\n", vals)
-
-	if len(vals) == 1 {
-		i, err := strconv.Atoi(input)
-		return i, i, err
-	}
-
-	if len(vals) > 2 {
-		return 0, 0, ErrInvalidPortRange
-	}
-
-	var (
-		begin int
-		end   int
-		err   error
-	)
-
-	// parse begin
-	if vals[0] != "" {
-		begin, err = strconv.Atoi(vals[0])
-		if err != nil {
-			return begin, end, err
-		}
-	}
-
-	// parse end
-	if vals[1] != "" {
-		end, err = strconv.Atoi(vals[1])
-		if begin > end {
-			return begin, end, ErrInvalidPortRange
-		}
-	} else {
-		end = -1 // XXX that is: until the end
-	}
-
-	return begin, end, err
-}
-
-func (mmsd *mmsdService) v1Instances(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	appID := vars["app_id"]
-	noResolve := r.URL.Query().Get("noresolve") == "1"
-	withServerID := r.URL.Query().Get("withid") == "1"
-
-	portBegin, portEnd, err := parseRange(r.URL.Query().Get("portIndex"))
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		log.Printf("error parsing range. %v\n", err)
-		return
-	}
-
-	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("NewService error. %v\n", err)
-		return
-	}
-
-	app, err := m.GetApp(appID)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("GetApp error. %v\n", err)
-		return
-	}
-
-	if app == nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	log.Printf("parseRange: %v .. %v (%v)\n", portBegin, portEnd, len(app.Ports))
-
-	if portEnd >= len(app.Ports) {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	if portEnd < 0 {
-		portEnd = len(app.Ports) - 1
-	}
-
-	if len(app.Tasks) == 0 {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	// appJson, err := json.MarshalIndent(app, "", " ")
-	// w.Write(appJson)
-	// fmt.Fprintf(w, "\n")
-	// return
-
-	var list []string
-	for _, task := range app.Tasks {
-		item := ""
-		if withServerID {
-			item += fmt.Sprintf("%v:", Hash(task.SlaveId))
-		}
-
-		item += resolveIPAddr(task.Host, noResolve)
-
-		for portIndex := portBegin; portIndex <= portEnd; portIndex++ {
-			item += fmt.Sprintf(":%d", task.Ports[portIndex])
-		}
-
-		list = append(list, item)
-	}
-
-	sort.Strings(list)
-
-	for _, entry := range list {
-		fmt.Fprintln(w, entry)
-	}
-}
-
-func (mmsd *mmsdService) v1ServicePorts(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	appID := vars["app_id"]
-
-	m, err := marathon.NewService(mmsd.MarathonIP, mmsd.MarathonPort)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("NewService error. %v\n", err)
-		return
-	}
-
-	app, err := m.GetApp(appID)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("GetApp error. %v\n", err)
-		return
-	}
-
-	if app == nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	for _, port := range app.Ports {
-		fmt.Fprintln(w, port)
-	}
-}
-
-func resolveIPAddr(dns string, skip bool) string {
-	if skip {
-		return dns
-	} else {
-		ip, err := net.ResolveIPAddr("ip", dns)
-		if err != nil {
-			return dns
-		} else {
-			return ip.String()
-		}
-	}
-}
 
 func (mmsd *mmsdService) setupEventBusListener() {
 	var url = fmt.Sprintf("http://%v:%v/v2/events",
@@ -498,13 +280,15 @@ func showVersion() {
 }
 
 func (mmsd *mmsdService) Run() {
+	var apiPort uint = 8082
 	flag.BoolVarP(&mmsd.Verbose, "verbose", "v", mmsd.Verbose, "Set verbosity level")
 	flag.IPVar(&mmsd.MarathonIP, "marathon-ip", mmsd.MarathonIP, "Marathon endpoint TCP IP address")
 	flag.UintVar(&mmsd.MarathonPort, "marathon-port", mmsd.MarathonPort, "Marathon endpoint TCP port number")
 	flag.DurationVar(&mmsd.ReconnectDelay, "reconnect-delay", mmsd.ReconnectDelay, "Marathon reconnect delay")
 	flag.StringVar(&mmsd.RunStateDir, "run-state-dir", mmsd.RunStateDir, "Path to directory to keep run-state")
 	flag.StringVar(&mmsd.FilterGroups, "filter-groups", mmsd.FilterGroups, "Application group filter")
-	flag.IPVar(&mmsd.ManagedIP, "managed-ip", mmsd.ManagedIP, "IP-address to manage for mmsd")
+	flag.IPVar(&mmsd.BindIP, "bind-ip", mmsd.BindIP, "IP address for handlers to bind")
+	flag.UintVar(&apiPort, "api-port", apiPort, "MMSD API TCP port")
 	flag.BoolVar(&mmsd.GatewayEnabled, "enable-gateway", mmsd.GatewayEnabled, "Enables gateway support")
 	flag.IPVar(&mmsd.GatewayAddr, "gateway-bind", mmsd.GatewayAddr, "gateway bind address")
 	flag.UintVar(&mmsd.GatewayPortHTTP, "gateway-port-http", mmsd.GatewayPortHTTP, "gateway port for HTTP")
@@ -515,7 +299,6 @@ func (mmsd *mmsdService) Run() {
 	flag.BoolVar(&mmsd.LocalHealthChecks, "enable-health-checks", mmsd.LocalHealthChecks, "Enable local health checks (if available) instead of relying on Marathon health checks alone.")
 	flag.StringVar(&mmsd.HaproxyBin, "haproxy-bin", mmsd.HaproxyBin, "path to haproxy binary")
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
-	flag.IPVar(&mmsd.ServiceAddr, "haproxy-bind", mmsd.ServiceAddr, "haproxy management port")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
 	flag.DurationVar(&mmsd.HaproxyReloadInterval, "haproxy-reload-interval", mmsd.HaproxyReloadInterval, "Interval between reload haproxy for bulk changes; default 5s")
 	flag.StringVar(&mmsd.HaproxyBeforeCmd, "haproxy-before-cmd", mmsd.HaproxyBeforeCmd, "Command to execute before Haproxy start/reload")
@@ -543,7 +326,7 @@ func (mmsd *mmsdService) Run() {
 
 	mmsd.setupHandlers()
 	mmsd.setupEventBusListener()
-	mmsd.setupHttpService()
+	NewAPI(appVersion, mmsd.MarathonIP, mmsd.MarathonPort, mmsd.BindIP, apiPort)
 
 	<-mmsd.quitChannel
 }
@@ -552,7 +335,7 @@ func (mmsd *mmsdService) setupHandlers() {
 	if mmsd.DnsEnabled {
 		mmsd.Handlers = append(mmsd.Handlers, &DnsManager{
 			Verbose:     mmsd.Verbose,
-			ServiceAddr: mmsd.ServiceAddr,
+			ServiceAddr: mmsd.BindIP,
 			ServicePort: mmsd.DnsPort,
 			PushSRV:     mmsd.DnsPushSRV,
 			BaseName:    mmsd.DnsBaseName,
@@ -562,7 +345,7 @@ func (mmsd *mmsdService) setupHandlers() {
 
 	if mmsd.UDPEnabled {
 		mmsd.Handlers = append(mmsd.Handlers, NewUdpManager(
-			mmsd.ServiceAddr,
+			mmsd.BindIP,
 			mmsd.Verbose,
 			mmsd.UDPEnabled,
 		))
@@ -574,7 +357,7 @@ func (mmsd *mmsdService) setupHandlers() {
 			Verbose:           mmsd.Verbose,
 			LocalHealthChecks: mmsd.LocalHealthChecks,
 			FilterGroups:      strings.Split(mmsd.FilterGroups, ","),
-			ServiceAddr:       mmsd.ServiceAddr,
+			Address:           mmsd.BindIP,
 			GatewayEnabled:    mmsd.GatewayEnabled,
 			GatewayAddr:       mmsd.GatewayAddr,
 			GatewayPortHTTP:   mmsd.GatewayPortHTTP,
@@ -585,7 +368,6 @@ func (mmsd *mmsdService) setupHandlers() {
 			OldConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg.old"),
 			PidFile:           filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
 			AdminSockPath:     filepath.Join(mmsd.RunStateDir, "haproxy.sock"),
-			ManagementAddr:    mmsd.ManagementAddr,
 			ManagementPort:    mmsd.HaproxyPort,
 			ReloadInterval:    mmsd.HaproxyReloadInterval,
 			BeforeCmd:         mmsd.HaproxyBeforeCmd,
@@ -615,16 +397,6 @@ func (mmsd *mmsdService) setupHandlers() {
 	}
 }
 
-func locateExe(name string) string {
-	for _, prefix := range strings.Split(os.Getenv("PATH"), ":") {
-		path := filepath.Join(prefix, name)
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-	return name // default to name only
-}
-
 func main() {
 	var mmsd = mmsdService{
 		MarathonScheme:        "http",
@@ -645,9 +417,7 @@ func main() {
 		HaproxyTailCfg:        "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:           8081,
 		HaproxyReloadInterval: time.Second * 5,
-		ManagementAddr:        net.ParseIP("0.0.0.0"),
-		ServiceAddr:           net.ParseIP("0.0.0.0"),
-		HttpApiPort:           8082,
+		BindIP:                net.ParseIP("0.0.0.0"),
 		Verbose:               false,
 		DnsEnabled:            false,
 		DnsPort:               53,
