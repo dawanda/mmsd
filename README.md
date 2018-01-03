@@ -174,7 +174,6 @@ on the application gateway's SSL port (usually 443)
 
 New flags:
 
-- `--api-port`
 - `--haproxy-enable-reuse-socket`
 
 
@@ -187,6 +186,7 @@ Following flags are removed:
 
 New flags:
 
+- `--api-port`
 - `--bind-ip`
 - `--haproxy-before-cmd`
 - `--haproxy-after-cmd`
