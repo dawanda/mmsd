@@ -75,13 +75,15 @@ type mmsdService struct {
 	GatewayPortHTTPS uint
 
 	// tcp load balancing (haproxy)
-	TCPEnabled            bool
-	HaproxyBin            string
-	HaproxyTailCfg        string
-	HaproxyPort           uint
-	HaproxyReloadInterval time.Duration
-	HaproxyBeforeCmd      string
-	HaproxyAfterCmd       string
+	TCPEnabled               bool
+	HaproxyBin               string
+	HaproxyTailCfg           string
+	HaproxyPort              uint
+	HaproxyReloadInterval    time.Duration
+	HaproxyBeforeCmd         string
+	HaproxyAfterCmd          string
+	HaproxyReuseSocketPath   string
+	HaproxyEnableReuseSocket bool
 
 	// udp load balancing
 	UDPEnabled bool
@@ -303,6 +305,7 @@ func (mmsd *mmsdService) Run() {
 	flag.DurationVar(&mmsd.HaproxyReloadInterval, "haproxy-reload-interval", mmsd.HaproxyReloadInterval, "Interval between reload haproxy for bulk changes; default 5s")
 	flag.StringVar(&mmsd.HaproxyBeforeCmd, "haproxy-before-cmd", mmsd.HaproxyBeforeCmd, "Command to execute before Haproxy start/reload")
 	flag.StringVar(&mmsd.HaproxyAfterCmd, "haproxy-after-cmd", mmsd.HaproxyAfterCmd, "Command to execute after Haproxy start/reload")
+	flag.BoolVar(&mmsd.HaproxyEnableReuseSocket, "haproxy-enable-reuse-socket", false, "Enable haproxy feature to share a socket for listing ports")
 	flag.BoolVar(&mmsd.DnsEnabled, "enable-dns", mmsd.DnsEnabled, "Enables DNS-based service discovery")
 	flag.UintVar(&mmsd.DnsPort, "dns-port", mmsd.DnsPort, "DNS service discovery port")
 	flag.BoolVar(&mmsd.DnsPushSRV, "dns-push-srv", mmsd.DnsPushSRV, "DNS service discovery to also push SRV on A")
@@ -368,6 +371,7 @@ func (mmsd *mmsdService) setupHandlers() {
 			OldConfigPath:     filepath.Join(mmsd.RunStateDir, "haproxy.cfg.old"),
 			PidFile:           filepath.Join(mmsd.RunStateDir, "haproxy.pid"),
 			AdminSockPath:     filepath.Join(mmsd.RunStateDir, "haproxy.sock"),
+			EnableReuseSocket: mmsd.HaproxyEnableReuseSocket,
 			ManagementPort:    mmsd.HaproxyPort,
 			ReloadInterval:    mmsd.HaproxyReloadInterval,
 			BeforeCmd:         mmsd.HaproxyBeforeCmd,
