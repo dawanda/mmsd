@@ -76,7 +76,10 @@ func (manager *HaproxyMgr) Setup() error {
 			if err != nil {
 				log.Panic(err)
 			}
-			manager.reloadConfig(false)
+			err = manager.reloadConfig(false)
+			if err != nil {
+				log.Printf("[haproxy] Error %v\n", err)
+			}
 			manager.configWriteMutex.Unlock()
 		}
 	}()
@@ -472,7 +475,7 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 			"  maxconn 32768\n"+
 			"  maxconnrate 32768\n"+
 			"  log 127.0.0.1 local0\n"+
-			"  stats socket %v mode 600 level admin\n"+
+			"  stats socket %v mode 600 level admin expose-fd listeners\n"+
 			"\n"+
 			"defaults\n"+
 			"  maxconn 32768\n"+
