@@ -387,21 +387,22 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 		result += fmt.Sprintf(
 			"frontend __frontend_%v\n"+
 				"  bind %v:%v%v\n"+
+				"  mode http\n"+
 				"  %v\n"+
+				"  option %v\n"+
 				"  option httplog\n"+
 				"  option dontlognull\n"+
 				"  option dontlog-normal\n"+
+				"  option forwardfor\n"+
 				"  default_backend %v\n"+
 				"\n"+
 				"backend %v\n"+
 				"  mode http\n"+
 				"  balance leastconn\n"+
-				"  option forwardfor\n"+
-				"  option %v\n"+
 				"  option abortonclose\n"+
 				"  option httpchk GET %v HTTP/1.1\\r\\nHost:\\ %v\n",
-			appID, bindAddr, servicePort, bindOpts, portLogging, appID, appID,
-			httpConnectionMode, healthCheck.Path, "health-check")
+			appID, bindAddr, servicePort, bindOpts, portLogging, httpConnectionMode,
+			appID, appID, healthCheck.Path, "health-check")
 	case "redis-master", "redis-server", "redis":
 		result += fmt.Sprintf(
 			"listen %v\n"+
@@ -514,7 +515,7 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 			"global\n"+
 			"  maxconn 32768\n"+
 			"  maxconnrate 32768\n"+
-			"  log 127.0.0.1 %v\n"+
+			"  log 127.0.0.1 len 4096 %v\n"+
 			"  stats socket %v mode 600 level admin expose-fd listeners\n"+
 			"\n"+
 			"defaults\n"+
