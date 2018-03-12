@@ -80,6 +80,7 @@ type mmsdService struct {
 	HaproxyTailCfg           string
 	HaproxyPort              uint
 	HaproxyReloadInterval    time.Duration
+	HaproxySyslogFacility    string
 	HaproxyBeforeCmd         string
 	HaproxyAfterCmd          string
 	HaproxyReuseSocketPath   string
@@ -303,6 +304,7 @@ func (mmsd *mmsdService) Run() {
 	flag.StringVar(&mmsd.HaproxyTailCfg, "haproxy-cfgtail", mmsd.HaproxyTailCfg, "path to haproxy tail config file")
 	flag.UintVar(&mmsd.HaproxyPort, "haproxy-port", mmsd.HaproxyPort, "haproxy management port")
 	flag.DurationVar(&mmsd.HaproxyReloadInterval, "haproxy-reload-interval", mmsd.HaproxyReloadInterval, "Interval between reload haproxy for bulk changes; default 5s")
+	flag.StringVar(&mmsd.HaproxySyslogFacility, "haproxy-syslog-facility", mmsd.HaproxySyslogFacility, "HAproxy syslog facility")
 	flag.StringVar(&mmsd.HaproxyBeforeCmd, "haproxy-before-cmd", mmsd.HaproxyBeforeCmd, "Command to execute before Haproxy start/reload")
 	flag.StringVar(&mmsd.HaproxyAfterCmd, "haproxy-after-cmd", mmsd.HaproxyAfterCmd, "Command to execute after Haproxy start/reload")
 	flag.BoolVar(&mmsd.HaproxyEnableReuseSocket, "haproxy-enable-reuse-socket", false, "Enable haproxy feature to share a socket for listing ports")
@@ -374,6 +376,7 @@ func (mmsd *mmsdService) setupHandlers() {
 			EnableReuseSocket: mmsd.HaproxyEnableReuseSocket,
 			ManagementPort:    mmsd.HaproxyPort,
 			ReloadInterval:    mmsd.HaproxyReloadInterval,
+			SyslogFacility:    mmsd.HaproxySyslogFacility,
 			BeforeCmd:         mmsd.HaproxyBeforeCmd,
 			AfterCmd:          mmsd.HaproxyAfterCmd,
 		})
@@ -420,6 +423,7 @@ func main() {
 		HaproxyBin:            locateExe("haproxy"),
 		HaproxyTailCfg:        "/etc/mmsd/haproxy-tail.cfg",
 		HaproxyPort:           8081,
+		HaproxySyslogFacility: "local5",
 		HaproxyReloadInterval: time.Second * 5,
 		BindIP:                net.ParseIP("0.0.0.0"),
 		Verbose:               false,
