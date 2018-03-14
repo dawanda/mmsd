@@ -41,6 +41,7 @@ type HaproxyMgr struct {
 	ManagementPort     uint
 	ReloadInterval     time.Duration
 	AdminSockPath      string
+	SyslogFacility     string
 	BeforeCmd          string
 	AfterCmd           string
 	ReuseSocketPath    string
@@ -62,6 +63,15 @@ const (
 	LB_VHOST_DEFAULT_HTTP  = "lb-vhost-default"
 	LB_VHOST_HTTPS         = "lb-vhost-ssl"
 	LB_VHOST_DEFAULT_HTTPS = "lb-vhost-default-ssl"
+
+	APP_DISABLE_HEALTHCHECK = "disable-haproxy-health-check"
+
+	APP_HTTP_CONNECTION_MODE                   = "http-connection-mode"
+	APP_HTTP_CONNECTION_OPTION_HTTPCLOSE       = "httpclose"
+	APP_HTTP_CONNECTION_OPTION_HTTPSERVERCLOSE = "http-server-close"
+	APP_HTTP_CONNECTION_OPTION_DEFAULT         = APP_HTTP_CONNECTION_OPTION_HTTPSERVERCLOSE
+
+	APP_LOGGING = "haproxy-logging"
 )
 
 func (manager *HaproxyMgr) Setup() error {
@@ -328,8 +338,19 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 
 	serverOpts := ""
 
-	if manager.LocalHealthChecks && portDef.Labels["disable-haproxy-health-check"] != "true" {
+	if manager.LocalHealthChecks && portDef.Labels[APP_DISABLE_HEALTHCHECK] != "true" {
 		serverOpts += " check"
+	}
+
+	httpConnectionMode := ""
+
+	switch portDef.Labels[APP_HTTP_CONNECTION_MODE] {
+	case APP_HTTP_CONNECTION_OPTION_HTTPCLOSE:
+		httpConnectionMode = APP_HTTP_CONNECTION_OPTION_HTTPCLOSE
+	case APP_HTTP_CONNECTION_OPTION_HTTPSERVERCLOSE:
+		httpConnectionMode = APP_HTTP_CONNECTION_OPTION_HTTPSERVERCLOSE
+	default:
+		httpConnectionMode = APP_HTTP_CONNECTION_OPTION_DEFAULT
 	}
 
 	if healthCheck.IntervalSeconds > 0 {
@@ -344,8 +365,21 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 	case 0:
 		// ignore
 	default:
-		log.Printf("Invalid proxy-protocol given for %v: %v - ignoring.",
-			app.Id, app.Labels["lb-proxy-protocol"])
+		log.Printf("Invalid %v given for %v: %v - ignoring.",
+			LB_PROXY_PROTOCOL, app.Id, portDef.Labels[LB_PROXY_PROTOCOL])
+	}
+
+	portLogging := ""
+
+	switch Atoi(portDef.Labels[APP_LOGGING], 1) {
+	case 1:
+		portLogging = "log global"
+	case 0:
+		portLogging = "no log"
+	default:
+		portLogging = "no log"
+		log.Printf("Invalid %v given for %v: %v - ignoring.",
+			APP_LOGGING, app.Id, portDef.Labels[APP_LOGGING])
 	}
 
 	switch appProtocol {
@@ -353,23 +387,28 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 		result += fmt.Sprintf(
 			"frontend __frontend_%v\n"+
 				"  bind %v:%v%v\n"+
+				"  mode http\n"+
+				"  %v\n"+
+				"  option %v\n"+
+				"  option httplog\n"+
 				"  option dontlognull\n"+
+				"  option dontlog-normal\n"+
+				"  option forwardfor\n"+
 				"  default_backend %v\n"+
 				"\n"+
 				"backend %v\n"+
 				"  mode http\n"+
 				"  balance leastconn\n"+
-				"  option forwardfor\n"+
-				"  option http-server-close\n"+
 				"  option abortonclose\n"+
 				"  option httpchk GET %v HTTP/1.1\\r\\nHost:\\ %v\n",
-			appID, bindAddr, servicePort, bindOpts, appID, appID,
-			healthCheck.Path, "health-check")
+			appID, bindAddr, servicePort, bindOpts, portLogging, httpConnectionMode,
+			appID, appID, healthCheck.Path, "health-check")
 	case "redis-master", "redis-server", "redis":
 		result += fmt.Sprintf(
 			"listen %v\n"+
 				"  bind %v:%v%v\n"+
 				"  option dontlognull\n"+
+				"  option dontlog-normal\n"+
 				"  mode tcp\n"+
 				"  balance leastconn\n"+
 				"  option tcp-check\n"+
@@ -386,6 +425,7 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 			"listen %v\n"+
 				"  bind %v:%v%v\n"+
 				"  option dontlognull\n"+
+				"  option dontlog-normal\n"+
 				"  mode tcp\n"+
 				"  balance leastconn\n"+
 				"  option tcp-check\n"+
@@ -396,6 +436,7 @@ func (manager *HaproxyMgr) makeConfigForPort(app *marathon.App, portIndex int) s
 			"listen %v\n"+
 				"  bind %v:%v%v\n"+
 				"  option dontlognull\n"+
+				"  option dontlog-normal\n"+
 				"  mode tcp\n"+
 				"  balance leastconn\n",
 			appID, bindAddr, servicePort, bindOpts)
@@ -474,7 +515,7 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 			"global\n"+
 			"  maxconn 32768\n"+
 			"  maxconnrate 32768\n"+
-			"  log 127.0.0.1 local0\n"+
+			"  log 127.0.0.1 len 4096 %v\n"+
 			"  stats socket %v mode 600 level admin expose-fd listeners\n"+
 			"\n"+
 			"defaults\n"+
@@ -484,7 +525,7 @@ func (manager *HaproxyMgr) makeConfigHead() (string, error) {
 			"  timeout connect 90000\n"+
 			"  timeout queue 90000\n"+
 			"  timeout http-request 90000\n"+
-			"\n", manager.AdminSockPath)
+			"\n", manager.SyslogFacility, manager.AdminSockPath)
 
 	mgntFragment := fmt.Sprintf(
 		"listen haproxy\n"+
